@@ -178,6 +178,7 @@ form{display:flex;flex-direction:column;gap:14px;margin-top:6px}
 <script src="_shared/gpcrypto.js"></script>
 <script src="_shared/store.js"></script>
 <script src="payload.enc.js"></script>
+<script src="_shared/swreg.js"></script>
 <script>
 (function(){
   const $=s=>document.querySelector(s);
@@ -191,7 +192,7 @@ form{display:flex;flex-direction:column;gap:14px;margin-top:6px}
     login.style.display='none'; home.classList.add('on');
     const g = ENC && ENC.meta && ENC.meta.generadoEl ? ENC.meta.generadoEl : '';
     $('#gen').textContent = g ? g.replace(' ',' · ').slice(0,16) : '—';
-    if('serviceWorker' in navigator){ navigator.serviceWorker.register('sw.js').catch(()=>{}); }
+    // el service worker lo registra swreg.js (con auto-refresco al abrir)
   }
   function showLogin(){ home.classList.remove('on'); login.style.display=''; pw.value=''; setTimeout(()=>pw.focus(),60); }
 

@@ -14,29 +14,26 @@
 <meta name="apple-mobile-web-app-title" content="Progestion">
 <meta name="mobile-web-app-capable" content="yes">
 <style>
-/* --- simulador (scoped a Factoring) --- */
-.simctrls{display:flex;flex-direction:column;gap:16px;margin-top:6px}
-.simctrl label{display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:12.5px;color:var(--mut);margin-bottom:9px;min-height:20px}
-.simctrl label b{color:var(--txt);font-variant-numeric:tabular-nums;font-size:14px;background:var(--panel3);border:1px solid var(--line);border-radius:7px;padding:3px 9px}
-.simctrl input[type=range]{-webkit-appearance:none;appearance:none;width:100%;height:6px;border-radius:6px;background:var(--panel3);border:1px solid var(--line);outline:none;cursor:pointer;padding:0;margin:0}
-.simctrl input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:22px;height:22px;border-radius:50%;background:var(--green);border:3px solid var(--panel);box-shadow:0 1px 6px rgba(0,0,0,.5);cursor:pointer;margin-top:0}
-.simctrl input[type=range]::-moz-range-thumb{width:22px;height:22px;border-radius:50%;background:var(--green);border:3px solid var(--panel);cursor:pointer}
-.simctrl input[type=range]::-moz-range-track{height:6px;border-radius:6px;background:var(--panel3)}
+/* --- simulador de costo de factoring (scoped) --- */
+.ftpills{display:flex;flex-wrap:wrap;gap:8px;margin:2px 0 16px}
+.ftpills .pill small{opacity:.72;font-weight:600;margin-left:5px}
+.siminputs{display:flex;flex-direction:column;gap:14px}
+.simfield label{display:block;font-size:12px;color:var(--mut);margin-bottom:6px}
+.simfield label small{opacity:.72;font-weight:500}
+.ipwrap{display:flex;align-items:center;background:var(--panel3);border:1px solid var(--line);border-radius:9px;overflow:hidden}
+.ipwrap:focus-within{border-color:var(--green)}
+.ipwrap span{padding:0 11px;color:var(--mut);font-size:13px;white-space:nowrap;background:rgba(255,255,255,.03);align-self:stretch;display:flex;align-items:center}
+.ipwrap input{flex:1;min-width:0;background:transparent;border:0;color:var(--txt);font-size:16px;padding:11px 12px;outline:none;font-variant-numeric:tabular-nums}
 .simres{display:flex;justify-content:space-between;align-items:baseline;gap:10px;font-size:13px;padding:9px 0;border-bottom:1px solid var(--line2)}
 .simres span{color:var(--mut)}
+.simres span small{opacity:.75}
 .simres b{font-variant-numeric:tabular-nums}
-.simres.big{margin-top:4px;padding:11px 12px;background:var(--panel3);border:1px solid var(--line);border-radius:9px;border-bottom:1px solid var(--line)}
+.simres.big{margin-top:6px;padding:12px 13px;background:var(--panel3);border:1px solid var(--line);border-radius:9px}
 .simres.big span{color:var(--txt);font-weight:600}
-.simres.big b{font-size:17px}
+.simres.big b{font-size:18px}
 .alert.ok{border-left-color:var(--green)}
 .alert.warn{border-left-color:var(--red);background:rgba(248,113,113,.07)}
-/* touch targets cómodos en móvil */
-@media(max-width:767px){
-  .simctrl input[type=range]{height:8px}
-  .simctrl input[type=range]::-webkit-slider-thumb{width:28px;height:28px}
-  .simctrl input[type=range]::-moz-range-thumb{width:28px;height:28px}
-  .simctrl label{min-height:44px}
-}
+@media(max-width:767px){ .ipwrap input{font-size:16px;padding:13px 12px} }
 </style>
 </head>
 <body></body>
@@ -47,212 +44,176 @@
 <script src="_Aplicaciones/_assets/core.js"></script>
 <script type="text/gp-app">
 const {mm,mAxis,money,fmt0,pct,pctN,sum,uniq,agg,esc,MES,isCierre,isPagada,color,icon}=GP;
-const EMPLOGO=GP.LOGOS;
-function empChip(name){ const k=EMPLOGO[name]; return k?`<span class="logochip"><img src="_Aplicaciones/_assets/logos/${k}.png" alt="${esc(name)}" onerror="this.parentNode.style.display='none'"></span>`:''; }
-function empCell(name){ return `<span class="emprow">${empChip(name)}<b>${esc(name)}</b></span>`; }
 const EMPCOL=['#22d3ee','#a78bfa','#34d399','#fbbf24','#f87171','#60a5fa','#f472b6','#2dd4bf','#fb923c','#a3e635'];
 const GREEN=color('--green')||'#34d399', RED=color('--red')||'#f87171', BLUE=color('--blue')||'#60a5fa', AMBER=color('--amber')||'#fbbf24';
+
+// nombre "bonito" de cada casa de factoring (FT)
+const FTNAME={CHILE:'Banco de Chile',BCI:'BCI',BICE:'BICE',SCOTIABANK:'Scotiabank',SECURITY:'Security',ITAU:'Itaú',SANTANDER:'Santander',ESTADO:'Banco Estado',INTERNACIONAL:'Internacional',CONSORCIO:'Consorcio',BTG:'BTG Pactual'};
+const ftName=k=>FTNAME[(''+k).toUpperCase().trim()]||k;
 
 const cieRows = R => R.filter(isCierre);
 // CxC interna candidata a factoring: CIERRE, cedida Interna, no pagada, con saldo no operado
 function candRows(R){ return cieRows(R).filter(r=>r.cedida==='Interna' && (r.montoNoOperado||0)>0 && !isPagada(r)); }
 // facturas ya operadas (cedidas a un factor)
 function opRows(R){ return cieRows(R).filter(r=>(r.montoOperado||0)>0); }
-
-// promedios reales de la operación factoring (defaults del simulador)
-function opDefaults(R){
-  const op=opRows(R);
-  const ts=op.map(r=>r.tasaOper).filter(x=>x>0);
-  const ds=op.map(r=>r.diasOper).filter(x=>x>0);
-  const avg=a=>a.length?a.reduce((s,x)=>s+x,0)/a.length:0;
-  return { tasaMes:(avg(ds)>0? avg(ts)/avg(ds)*30 : 0.006)||0.006, dias:Math.round(avg(ds))||30 };
-}
 // espera al flujo si aún carga
 function loading(t){ return `<div class="hd"><div><h1>${icon('cycle',20)} ${esc(t)}</h1><div class="sub">Cargando posición de caja…</div></div></div>
   <div class="panel"><div class="empty"><div class="e-ic">${icon('hourglass',32)}</div>Cargando datos de flujo de caja del motor…</div></div>`; }
-
-/* ---------- Resumen · Caja & Factoring ---------- */
-function vResumen(R,ctx){
-  const F=GP.FLUJO; if(!F) return loading('Resumen');
-  const cie=cieRows(R);
-  const oper=sum(cie,r=>r.montoOperado), noOper=sum(cie,r=>r.montoNoOperado);
-  const totCedible=oper+noOper||1;
-  const costoOper=sum(cie,r=>r.costoOper);
-  const cand=candRows(R);
-  const cxcInterna=sum(cand,r=>r.montoNoOperado);
-  const rec=F.meta.recurr||{llss:0,iva:0,credito:0};
-  const recTot=(rec.llss||0)+(rec.iva||0)+(rec.credito||0);
-  const cajaEmp=(F.caja||[]).slice().map(c=>({label:c.emp,value:c.saldo})).sort((a,b)=>b.value-a.value);
-  const donutOp=[{label:'Operado (factoring)',value:oper,color:GREEN},{label:'No operado (cobro interno)',value:noOper,color:BLUE}];
-  const empF=GP.F.empresa;
-  return `
-  <div class="hd"><div><h1>${icon('wallet',19)} Resumen</h1><div class="sub">Posición de tesorería y uso de factoring${empF!=='Todas'?' · '+esc(empF):''}</div></div></div>
-  <div class="grid k4">
-    <div class="card kpi glow" style="--accent:var(--green)"><div class="lbl">${icon('bank',13)} Caja actual consolidada</div><div class="val">${mm(F.meta.cajaActual)}</div><div class="note">saldo disponible del grupo</div></div>
-    <div class="card kpi glow" style="--accent:var(--cyan)"><div class="lbl">${icon('coins',13)} Caja CLP (c/extra)</div><div class="val sm">${mm(F.extra.cajaCLP)}</div><div class="note">incluye cta. dos ${mm(F.extra.ctaDos)}</div></div>
-    <div class="card kpi glow" style="--accent:var(--blue)"><div class="lbl">${icon('creditCard',13)} Dólares (USD)</div><div class="val sm">US$ ${fmt0(F.extra.usdTotal)}</div><div class="note">${(F.extra.usd||[]).length} cuentas en USD</div></div>
-    <div class="card kpi glow" style="--accent:var(--red)"><div class="lbl">${icon('alert',13)} Egresos recurrentes / mes</div><div class="val sm">${mm(recTot)}</div><div class="note">LLSS + IVA + cuota crédito</div></div>
-  </div>
-  <div class="grid k4">
-    <div class="card kpi" style="--accent:var(--green)"><div class="lbl">${icon('cycle',13)} % Operado (factoring)</div><div class="val">${pct(oper,totCedible)}</div><div class="note">${mm(oper)} cedido a factores</div></div>
-    <div class="card kpi" style="--accent:var(--amber)"><div class="lbl">${icon('percent',13)} Costo total operación</div><div class="val sm">${mm(costoOper)}</div><div class="note">costo financiero del factoring</div></div>
-    <div class="card kpi" style="--accent:var(--purple)"><div class="lbl">${icon('receipt',13)} CxC interna NO operada</div><div class="val sm">${mm(cxcInterna)}</div><div class="note"><b>${cand.length.toLocaleString('es-CL')}</b> facturas cobrables</div></div>
-    <div class="card kpi" style="--accent:var(--teal)"><div class="lbl">${icon('layers',13)} Cartera cedible total</div><div class="val sm">${mm(totCedible)}</div><div class="note">operado + no operado</div></div>
-  </div>
-  <div class="split">
-    <div class="panel"><h3>${icon('building',15)} Caja por empresa</h3><div class="ph">Saldo disponible por sociedad del grupo</div>${GP.hbars(cajaEmp)}</div>
-    <div class="panel"><h3>${icon('pie',15)} Cartera: operado vs. no operado</h3><div class="ph">Composición del monto cedible (CIERRE)</div>
-      <div class="donutwrap">${GP.donut(donutOp,{center:pct(oper,totCedible),centerSub:'operado'})}${GP.legendList(donutOp,totCedible)}</div></div>
-  </div>
-  <div class="panel"><h3>${icon('flag',15)} Lectura de tesorería</h3><div class="ph">Holgura de la caja frente a los egresos recurrentes del mes</div>
-    ${(function(){ const holg=F.meta.cajaActual-recTot; const ok=holg>=0;
-      return `<div class="alert ${ok?'ok':'warn'}" style="align-items:center">${icon(ok?'check':'alert',18)}
-        <div>La caja consolidada de <b>${mm(F.meta.cajaActual)}</b> ${ok?'cubre':'NO cubre'} los <b>${mm(recTot)}</b> de egresos recurrentes del mes.
-        Holgura: <b style="color:${ok?'var(--green)':'var(--red)'}">${mm(holg)}</b>. Hay <b>${mm(cxcInterna)}</b> de CxC interna que aún se puede operar para inyectar caja (ver Simulador).</div></div>`; })()}</div>`;
-}
-
-/* ---------- Simulador ---------- */
-const SIM={pctCartera:30,tasaMes:null,dias:null,comision:0.5};
-function vSimulador(R,ctx){
-  const F=GP.FLUJO; if(!F) return loading('Simulador de Factoring');
-  const cand=candRows(R).slice().sort((a,b)=>b.montoNoOperado-a.montoNoOperado);
-  const carteraTot=sum(cand,r=>r.montoNoOperado);
-  const def=opDefaults(R);
-  if(SIM.tasaMes==null) SIM.tasaMes=+(def.tasaMes*100).toFixed(2);
-  if(SIM.dias==null)    SIM.dias=def.dias;
-  const rec=F.meta.recurr||{llss:0,iva:0,credito:0};
-  const recTot=(rec.llss||0)+(rec.iva||0)+(rec.credito||0);
-  // contexto del simulador: se define ANTES del return (los nodos aún no existen,
-  // pero simRecalc los busca con getElementById tras el render, vía cfg.after)
-  window.__SIM_CTX__={carteraTot,cajaActual:F.meta.cajaActual,recTot,recLlss:rec.llss||0,recIva:rec.iva||0,recCred:rec.credito||0};
-  // tabla candidatas (top 40 para la vista; el cálculo usa toda la cartera*porcentaje)
-  const top=cand.slice(0,40);
-  return `
-  <div class="hd"><div><h1>${icon('sliders',19)} Simulador</h1><div class="sub">¿Qué pasa con la caja si operamos esta cartera? · recálculo en vivo</div></div></div>
-  <div class="split-2-1">
-    <div class="panel"><h3>${icon('sliders',15)} Parámetros de la operación</h3><div class="ph">Ajusta y observa el impacto inmediato en la caja</div>
-      <div class="simctrls">
-        <div class="simctrl"><label for="s_pct">% de la cartera a operar <b id="s_pct_v">${SIM.pctCartera}%</b></label>
-          <input type="range" id="s_pct" min="0" max="100" step="5" value="${SIM.pctCartera}" oninput="SIM.pctCartera=+this.value;simRecalc()"></div>
-        <div class="simctrl"><label for="s_tasa">Tasa mensual del factor <b id="s_tasa_v">${SIM.tasaMes.toFixed(2)}%</b></label>
-          <input type="range" id="s_tasa" min="0.20" max="3.00" step="0.05" value="${SIM.tasaMes}" oninput="SIM.tasaMes=+this.value;simRecalc()"></div>
-        <div class="simctrl"><label for="s_dias">Días de operación <b id="s_dias_v">${SIM.dias} días</b></label>
-          <input type="range" id="s_dias" min="1" max="120" step="1" value="${SIM.dias}" oninput="SIM.dias=+this.value;simRecalc()"></div>
-        <div class="simctrl"><label for="s_com">Comisión sobre monto operado <b id="s_com_v">${SIM.comision.toFixed(2)}%</b></label>
-          <input type="range" id="s_com" min="0" max="2" step="0.05" value="${SIM.comision}" oninput="SIM.comision=+this.value;simRecalc()"></div>
-      </div>
-      <div class="muted" style="font-size:11px;margin-top:10px;line-height:1.6">Defaults tomados del promedio real de lo operado: tasa <b style="color:var(--txt)">${(def.tasaMes*100).toFixed(2)}%/mes</b>, plazo <b style="color:var(--txt)">${def.dias} días</b>. Cartera candidata total: <b style="color:var(--txt)">${mm(carteraTot)}</b> (${cand.length.toLocaleString('es-CL')} facturas internas no pagadas).</div>
-    </div>
-    <div class="panel"><h3>${icon('coins',15)} Resultado</h3><div class="ph">Anticipo neto e impacto</div>
-      <div id="simKpis"></div></div>
-  </div>
-  <div class="panel"><h3>${icon('trend',15)} Impacto en la caja</h3><div class="ph gpic">Caja actual ${icon('arrowRight',12)} anticipo neto del factoring ${icon('arrowRight',12)} caja resultante · contra egresos recurrentes del mes</div>
-    <div id="simWfall"></div>
-    <div id="simVerdict" style="margin-top:12px"></div></div>
-  <div class="panel tight"><h3 style="padding:14px 16px 0">${icon('list',15)} Facturas candidatas a operar (mayores primero)</h3><div class="ph" style="padding:0 16px">Top ${top.length} de ${cand.length.toLocaleString('es-CL')} · CxC interna no pagada</div>
-    <div class="scroll tall"><table>
-      <thead><tr><th>Cliente</th><th>Empresa</th><th class="num">Monto no operado</th><th class="num">Días mora</th><th>Estado</th><th class="num">Cond. pago</th></tr></thead>
-      <tbody>${top.map(r=>`<tr><td>${esc(r.cliente)}</td><td class="muted">${empCell(r.empresa)}</td><td class="num">${fmt0(r.montoNoOperado)}</td>
-        <td class="num">${r.diasMora>0?r.diasMora.toLocaleString('es-CL'):'—'}</td><td>${moraChip(r)}</td><td class="num muted">${r.condicionPago?esc(r.condicionPago)+' d':'—'}</td></tr>`).join('')}
-      </tbody></table></div></div>`;
-}
 function moraChip(r){ if(isPagada(r))return '<span class="chip c-green">Pagada</span>';
   if(GP.isMora(r))return '<span class="chip c-red">'+esc((r.estadoMora||'').replace(/^\d\.\s*/,''))+'</span>';
   if((r.estadoMora||'')==='Vigente')return '<span class="chip c-blue">Vigente</span>';
   return '<span class="chip c-gray">'+esc(r.estadoMora||'—')+'</span>'; }
-// motor del simulador (recalcula DOM sin re-render)
-function simRecalc(){
-  const C=window.__SIM_CTX__; if(!C)return;
-  const set=(id,v)=>{const e=document.getElementById(id); if(e)e.textContent=v;};
-  set('s_pct_v',SIM.pctCartera+'%'); set('s_tasa_v',SIM.tasaMes.toFixed(2)+'%'); set('s_dias_v',SIM.dias+' días'); set('s_com_v',SIM.comision.toFixed(2)+'%');
-  const monto=C.carteraTot*SIM.pctCartera/100;
-  const costoFin=monto*(SIM.tasaMes/100)*(SIM.dias/30);
-  const comision=monto*(SIM.comision/100);
-  const costo=costoFin+comision;
-  const neto=monto-costo;
-  const cajaFin=C.cajaActual+neto;
-  const kpis=document.getElementById('simKpis');
-  if(kpis) kpis.innerHTML=`
-    <div class="simres"><span>Monto a operar</span><b>${mm(monto)}</b></div>
-    <div class="simres"><span>Costo financiero (${SIM.dias}d @ ${SIM.tasaMes.toFixed(2)}%/mes)</span><b style="color:var(--red)">- ${mm(costoFin)}</b></div>
-    <div class="simres"><span>Comisión (${SIM.comision.toFixed(2)}%)</span><b style="color:var(--red)">- ${mm(comision)}</b></div>
-    <div class="simres big"><span>Anticipo NETO recibido</span><b style="color:var(--green)">${mm(neto)}</b></div>
-    <div class="simres"><span>Costo total / tasa efectiva</span><b>${mm(costo)} · ${monto>0?(100*costo/monto).toFixed(2):'0.0'}%</b></div>`;
-  const wf=document.getElementById('simWfall');
-  if(wf) wf.innerHTML=GP.waterfall([
-    {label:'Caja actual',value:C.cajaActual,type:'base'},
-    {label:'Anticipo neto',value:neto,type:'up'},
-    {label:'Egresos recurr.',value:-C.recTot,type:'down'},
-    {label:'Caja resultante',value:cajaFin-C.recTot,type:'total'}
-  ],{h:250});
-  const v=document.getElementById('simVerdict');
-  if(v){ const post=cajaFin-C.recTot; const ok=post>=0;
-    v.innerHTML=`<div class="alert ${ok?'ok':'warn'}" style="align-items:center">${GP.icon(ok?'check':'alert',18)}
-      <div>Con el anticipo neto de <b>${mm(neto)}</b>, tras cubrir los <b>${mm(C.recTot)}</b> de egresos recurrentes (LLSS ${mm(C.recLlss)} · IVA ${mm(C.recIva)} · crédito ${mm(C.recCred)}),
-      la caja queda en <b style="color:${ok?'var(--green)':'var(--red)'}">${mm(post)}</b>. ${ok?'La caja alcanza con holgura.':'La caja NO alcanza; operar más cartera o diferir egresos.'}</div></div>`; }
-}
-window.SIM=SIM; window.simRecalc=simRecalc;
 
-/* ---------- Operado ---------- */
-function vOperado(R,ctx){
+// tasas reales por factor (FT) derivadas de lo YA operado -> alimentan el simulador
+function factorRates(){
+  const op=GP.DB.filter(r=>isCierre(r) && (r.montoOperado||0)>0 && r.tasaOper>0);
+  const g={};
+  op.forEach(r=>{ const k=(''+ (r.factoring||'')).trim(); if(!k)return;
+    const o=g[k]||(g[k]={ts:0,n:0,mOp:0,ds:0,nd:0,com:0}); o.ts+=r.tasaOper;o.n++;o.mOp+=r.montoOperado||0; o.com+=r.comisionOper||0; if(r.diasOper>0){o.ds+=r.diasOper;o.nd++;} });
+  return Object.entries(g).map(([k,o])=>({factor:k,tasaMes:o.ts/o.n,diasProm:o.nd?Math.round(o.ds/o.nd):30,mOp:o.mOp,n:o.n,comRate:o.mOp?o.com/o.mOp:0}))
+    .filter(o=>o.n>=5).sort((a,b)=>b.mOp-a.mOp);
+}
+
+/* ============================================================ CAJA (posición de tesorería) */
+function vCaja(R){
+  const F=GP.FLUJO; if(!F) return loading('Caja');
+  const rec=F.meta.recurr||{llss:0,iva:0,credito:0};
+  const recTot=(rec.llss||0)+(rec.iva||0)+(rec.credito||0);
+  const cajaEmp=(F.caja||[]).slice().map(c=>({label:c.emp,value:c.saldo})).sort((a,b)=>b.value-a.value);
+  const ctaAcc=F.extra.ctaDosAcc||[], usd=F.extra.usd||[];
+  const holg=F.meta.cajaActual-recTot; const ok=holg>=0;
+  return `
+  <div class="hd"><div><h1>${icon('bank',19)} Caja</h1><div class="sub">Posición de tesorería del grupo · saldo real de cartola + otras cuentas</div></div></div>
+  <div class="grid k4">
+    <div class="card kpi glow" style="--accent:var(--green)"><div class="lbl">${icon('bank',13)} Caja real consolidada</div><div class="val">${mm(F.meta.cajaActual)}</div><div class="note">saldo bancario real (cartola · status REAL) = cuadratura</div></div>
+    <div class="card kpi glow" style="--accent:var(--cyan)"><div class="lbl">${icon('coins',13)} Cuenta dos (CLP)</div><div class="val sm">${mm(F.extra.ctaDos)}</div><div class="note">${ctaAcc.length?esc(ctaAcc[0].nom):'cuenta adicional CLP'}</div></div>
+    <div class="card kpi glow" style="--accent:var(--purple)"><div class="lbl">${icon('wallet',13)} Posición CLP total</div><div class="val sm">${mm(F.extra.cajaCLP)}</div><div class="note">caja real + cuenta dos</div></div>
+    <div class="card kpi glow" style="--accent:var(--blue)"><div class="lbl">${icon('creditCard',13)} Dólares (USD)</div><div class="val sm">US$ ${fmt0(F.extra.usdTotal)}</div><div class="note">${usd.length} cuentas en USD</div></div>
+  </div>
+  <div class="split">
+    <div class="panel"><h3>${icon('building',15)} Caja por empresa</h3><div class="ph">Saldo real disponible por sociedad (cartola)</div>${GP.hbars(cajaEmp)}</div>
+    <div class="panel tight"><h3 style="padding:14px 16px 0">${icon('wallet',15)} Otras cuentas</h3><div class="ph" style="padding:0 16px">Cuenta dos (CLP) y cuentas en dólares · hoja "Otras cuentas"</div>
+      <div class="scroll"><table class="gtab">
+        <thead><tr><th>Cuenta</th><th>Banco</th><th class="num">Monto</th><th>Moneda</th></tr></thead>
+        <tbody>
+          ${ctaAcc.map(c=>`<tr><td><b>${esc(c.nom)}</b></td><td class="muted">${esc(c.banco)}</td><td class="num">${fmt0(c.monto)}</td><td class="muted">CLP</td></tr>`).join('')}
+          ${usd.map(c=>`<tr><td><b>${esc(c.nom)}</b></td><td class="muted">${esc(c.banco)}</td><td class="num">US$ ${fmt0(c.usd)}</td><td class="muted">USD</td></tr>`).join('')}
+        </tbody></table></div></div>
+  </div>
+  <div class="panel"><h3>${icon('flag',15)} Lectura de tesorería</h3><div class="ph">Holgura de la caja real frente a los egresos recurrentes del mes</div>
+    <div class="alert ${ok?'ok':'warn'}" style="align-items:center">${icon(ok?'check':'alert',18)}
+      <div>La caja real de <b>${mm(F.meta.cajaActual)}</b> ${ok?'cubre':'NO cubre'} los <b>${mm(recTot)}</b> de egresos recurrentes del mes
+      (LLSS ${mm(rec.llss)} · IVA ${mm(rec.iva)} · crédito ${mm(rec.credito)}). Holgura: <b style="color:${ok?'var(--green)':'var(--red)'}">${mm(holg)}</b>.</div></div></div>`;
+}
+
+/* ============================================================ FACTORING (análisis de lo operado) */
+function vFactoring(R){
   const cie=cieRows(R);
   const op=opRows(R);
   const oper=sum(cie,r=>r.montoOperado), noOper=sum(cie,r=>r.montoNoOperado);
   const totCedible=oper+noOper||1;
-  // por entidad de factoring (solo facturas operadas; el campo 'factoring' en no-operadas es el código interno)
+  const costoOper=sum(cie,r=>r.costoOper);
+  const cand=candRows(R); const cxcInterna=sum(cand,r=>r.montoNoOperado);
   const ent={};
-  op.forEach(r=>{ const k=r.factoring||'(sin entidad)'; const o=ent[k]||(ent[k]={monto:0,costo:0,ds:0,ts:0,n:0,nT:0});
-    o.monto+=r.montoOperado||0; o.costo+=r.costoOper||0;
-    if(r.diasOper>0){o.ds+=r.diasOper;o.ts+=r.tasaOper||0;o.nT++;} o.n++; });
-  const entRows=Object.entries(ent).map(([k,o])=>({k,...o,
-    tasaProm:o.nT?o.ts/o.nT:0, diasProm:o.nT?o.ds/o.nT:0})).sort((a,b)=>b.monto-a.monto);
+  op.forEach(r=>{ const k=(''+(r.factoring||'(sin entidad)')); const o=ent[k]||(ent[k]={monto:0,costo:0,ds:0,ts:0,n:0,nT:0});
+    o.monto+=r.montoOperado||0; o.costo+=r.costoOper||0; if(r.diasOper>0){o.ds+=r.diasOper;o.ts+=r.tasaOper||0;o.nT++;} o.n++; });
+  const entRows=Object.entries(ent).map(([k,o])=>({k,...o,tasaProm:o.nT?o.ts/o.nT:0,diasProm:o.nT?o.ds/o.nT:0})).sort((a,b)=>b.monto-a.monto);
   const totMonto=sum(entRows,o=>o.monto)||1, totCosto=sum(entRows,o=>o.costo);
   const donutOp=[{label:'Operado (factoring)',value:oper,color:GREEN},{label:'No operado (cobro interno)',value:noOper,color:BLUE}];
   return `
-  <div class="hd"><div><h1>${icon('cycle',19)} Operado</h1><div class="sub">Análisis de lo ya cedido a entidades de factoring</div></div></div>
+  <div class="hd"><div><h1>${icon('cycle',19)} Factoring</h1><div class="sub">Cartera cedida a factores · costo financiero y uso del factoring</div></div></div>
   <div class="grid k4">
-    <div class="card kpi glow" style="--accent:var(--green)"><div class="lbl">${icon('coins',13)} Total operado</div><div class="val sm">${mm(oper)}</div><div class="note"><b>${op.length.toLocaleString('es-CL')}</b> facturas cedidas</div></div>
-    <div class="card kpi glow" style="--accent:var(--amber)"><div class="lbl">${icon('percent',13)} Costo financiero</div><div class="val sm">${mm(totCosto)}</div><div class="note">${totMonto?pct(totCosto,totMonto):'—'} del operado</div></div>
-    <div class="card kpi glow" style="--accent:var(--cyan)"><div class="lbl">${icon('cycle',13)} % Operado</div><div class="val">${pct(oper,totCedible)}</div><div class="note">de la cartera cedible</div></div>
-    <div class="card kpi glow" style="--accent:var(--blue)"><div class="lbl">${icon('bank',13)} Entidades activas</div><div class="val">${entRows.length}</div><div class="note">factores utilizados</div></div>
+    <div class="card kpi glow" style="--accent:var(--green)"><div class="lbl">${icon('cycle',13)} % Operado</div><div class="val">${pct(oper,totCedible)}</div><div class="note">${mm(oper)} cedido a factores</div></div>
+    <div class="card kpi glow" style="--accent:var(--cyan)"><div class="lbl">${icon('coins',13)} Total operado</div><div class="val sm">${mm(oper)}</div><div class="note"><b>${op.length.toLocaleString('es-CL')}</b> facturas cedidas</div></div>
+    <div class="card kpi glow" style="--accent:var(--amber)"><div class="lbl">${icon('percent',13)} Costo financiero</div><div class="val sm">${mm(costoOper)}</div><div class="note">${totCedible?pct(costoOper,oper):'—'} del operado</div></div>
+    <div class="card kpi glow" style="--accent:var(--purple)"><div class="lbl">${icon('receipt',13)} CxC interna no operada</div><div class="val sm">${mm(cxcInterna)}</div><div class="note"><b>${cand.length.toLocaleString('es-CL')}</b> facturas operables</div></div>
   </div>
   <div class="split">
-    <div class="panel"><h3>${icon('bank',15)} Operado por entidad de factoring</h3><div class="ph">Monto cedido a cada factor</div>${GP.hbars(entRows.map((o,i)=>({label:o.k,value:o.monto,color:EMPCOL[i%EMPCOL.length]})))}</div>
-    <div class="panel"><h3>${icon('pie',15)} Operado vs. no operado</h3><div class="ph">Uso del factoring sobre la cartera cedible</div>
+    <div class="panel"><h3>${icon('bank',15)} Operado por factor (FT)</h3><div class="ph">Monto cedido a cada casa de factoring</div>${GP.hbars(entRows.map((o,i)=>({label:ftName(o.k),value:o.monto,color:EMPCOL[i%EMPCOL.length]})))}</div>
+    <div class="panel"><h3>${icon('pie',15)} Operado vs. no operado</h3><div class="ph">Composición del monto cedible (CIERRE)</div>
       <div class="donutwrap">${GP.donut(donutOp,{center:pct(oper,totCedible),centerSub:'operado'})}${GP.legendList(donutOp,totCedible)}</div></div>
   </div>
-  <div class="panel tight"><h3 style="padding:14px 16px 0">${icon('list',15)} Detalle por entidad</h3><div class="ph" style="padding:0 16px">Monto operado, costo, tasa y plazo promedio</div>
-    <div class="scroll"><table>
-      <thead><tr><th>Entidad</th><th class="num">Monto operado</th><th class="num">% del total</th><th class="num">N° fac.</th><th class="num">Costo</th><th class="num">Tasa prom.</th><th class="num">Días prom.</th></tr></thead>
-      <tbody>${entRows.map(o=>`<tr><td><b>${esc(o.k)}</b></td><td class="num">${fmt0(o.monto)}</td><td class="num muted">${pct(o.monto,totMonto)}</td>
+  <div class="panel tight"><h3 style="padding:14px 16px 0">${icon('list',15)} Detalle por factor</h3><div class="ph" style="padding:0 16px">Monto operado, costo, tasa y plazo promedio</div>
+    <div class="scroll"><table class="gtab">
+      <thead><tr><th>Factor (FT)</th><th class="num">Monto operado</th><th class="num">% del total</th><th class="num">N° fac.</th><th class="num">Costo</th><th class="num">Tasa prom.</th><th class="num">Días prom.</th></tr></thead>
+      <tbody>${entRows.map(o=>`<tr><td><b>${esc(ftName(o.k))}</b></td><td class="num">${fmt0(o.monto)}</td><td class="num muted">${pct(o.monto,totMonto)}</td>
         <td class="num">${o.n.toLocaleString('es-CL')}</td><td class="num">${fmt0(o.costo)}</td>
         <td class="num">${o.tasaProm>0?(o.tasaProm*100).toFixed(2)+'%':'—'}</td><td class="num">${o.diasProm>0?o.diasProm.toFixed(0):'—'}</td></tr>`).join('')}
         <tr class="ttl"><td>TOTAL</td><td class="num">${fmt0(totMonto)}</td><td class="num">100%</td><td class="num">${op.length.toLocaleString('es-CL')}</td><td class="num">${fmt0(totCosto)}</td><td colspan="2"></td></tr>
       </tbody></table></div></div>`;
 }
 
-/* ---------- Flujo de caja ---------- */
-function vFlujo(R,ctx){
+/* ============================================================ SIMULADOR · costo de factoring de UNA factura */
+const SIM={factor:null,monto:10000000,dias:30,tasa:null,comision:0};
+function vSimulador(R){
+  const rates=factorRates();
+  if(!rates.length) return `<div class="hd"><div><h1>${icon('sliders',19)} Simulador de costo de factoring</h1><div class="sub">Costo de operar una factura</div></div></div>
+    <div class="panel"><div class="empty"><div class="e-ic">${icon('alert',30)}</div>Sin operaciones de factoring con tasa para derivar los factores.</div></div>`;
+  if(SIM.factor==null || !rates.find(r=>r.factor===SIM.factor)){ SIM.factor=rates[0].factor; SIM.tasa=+(rates[0].tasaMes*100).toFixed(3); }
+  const cur=rates.find(r=>r.factor===SIM.factor)||rates[0];
+  if(SIM.tasa==null) SIM.tasa=+(cur.tasaMes*100).toFixed(3);
+  window.__SIMR__=rates;
+  return `
+  <div class="hd"><div><h1>${icon('sliders',19)} Simulador de costo de factoring</h1><div class="sub">¿Cuánto cuesta operar una factura? · elige el factor, ingresa el monto y los días</div></div></div>
+  <div class="split-2-1">
+    <div class="panel"><h3>${icon('bank',15)} Factor (FT) a utilizar</h3><div class="ph">La tasa se toma sola del promedio real operado con cada factor</div>
+      <div class="ftpills">${rates.map(r=>`<button class="pill${r.factor===SIM.factor?' on':''}" onclick="pickFactor('${esc(r.factor)}')">${esc(ftName(r.factor))}<small>${(r.tasaMes*100).toFixed(2)}%/mes</small></button>`).join('')}</div>
+      <div class="siminputs">
+        <div class="simfield"><label>Monto de la factura a operar</label>
+          <div class="ipwrap"><span>$</span><input type="number" id="s_monto" value="${SIM.monto}" min="0" step="100000" oninput="SIM.monto=+this.value||0;simRecalc()"></div></div>
+        <div class="simfield"><label>Días de la operación <small>(la factura suele ir a 30 días)</small></label>
+          <div class="ipwrap"><input type="number" id="s_dias" value="${SIM.dias}" min="1" max="180" step="1" oninput="SIM.dias=+this.value||0;simRecalc()"><span>días</span></div></div>
+        <div class="simfield"><label>Tasa mensual del factor <small>(auto según FT · editable)</small></label>
+          <div class="ipwrap"><input type="number" id="s_tasa" value="${SIM.tasa}" min="0" max="10" step="0.01" oninput="SIM.tasa=+this.value||0;simRecalc()"><span>%/mes</span></div></div>
+      </div>
+      <div class="muted" style="font-size:11px;margin-top:13px;line-height:1.65">Costo financiero = <b style="color:var(--txt)">monto × tasa mensual × (días ÷ 30)</b>. La tasa mostrada es el promedio real de lo operado con <b style="color:var(--txt)">${esc(ftName(cur.factor))}</b> (${cur.n.toLocaleString('es-CL')} operaciones · ${cur.diasProm} días prom.).</div>
+    </div>
+    <div class="panel"><h3>${icon('coins',15)} Costo de la operación</h3><div class="ph">Resultado del factoring de esta factura</div>
+      <div id="simRes"></div></div>
+  </div>
+  <div class="panel tight"><h3 style="padding:14px 16px 0">${icon('list',15)} Tasas por factor (según lo operado real)</h3><div class="ph" style="padding:0 16px">Promedios reales por casa de factoring · clic en una fila para simular con ese factor</div>
+    <div class="scroll"><table class="gtab">
+      <thead><tr><th>Factor (FT)</th><th class="num">Tasa mensual prom.</th><th class="num">Días prom.</th><th class="num">N° operaciones</th><th class="num">Monto operado histórico</th></tr></thead>
+      <tbody>${rates.map(r=>`<tr style="cursor:pointer" onclick="pickFactor('${esc(r.factor)}')"><td><b>${esc(ftName(r.factor))}</b>${r.factor===SIM.factor?' <span class="chip c-green">en uso</span>':''}</td>
+        <td class="num">${(r.tasaMes*100).toFixed(2)}%</td><td class="num">${r.diasProm}</td><td class="num">${r.n.toLocaleString('es-CL')}</td><td class="num muted">${fmt0(r.mOp)}</td></tr>`).join('')}
+      </tbody></table></div></div>`;
+}
+function simRecalc(){
+  const monto=SIM.monto||0, dias=SIM.dias||0, tasa=SIM.tasa||0, comPct=SIM.comision||0;
+  const costoFin=monto*(tasa/100)*(dias/30);
+  const comision=monto*(comPct/100);
+  const costo=costoFin+comision;
+  const neto=monto-costo;
+  const ef=monto>0?100*costo/monto:0;
+  const el=document.getElementById('simRes'); if(!el)return;
+  el.innerHTML=`
+    <div class="simres"><span>Monto de la factura</span><b>${money(monto)}</b></div>
+    <div class="simres"><span>Costo financiero <small>(${fmt0(dias)} d @ ${tasa.toFixed(2)}%/mes)</small></span><b style="color:var(--red)">− ${money(Math.round(costoFin))}</b></div>
+    ${comPct>0?`<div class="simres"><span>Comisión (${comPct.toFixed(2)}%)</span><b style="color:var(--red)">− ${money(Math.round(comision))}</b></div>`:''}
+    <div class="simres"><span>Costo total de la operación</span><b style="color:var(--red)">− ${money(Math.round(costo))}</b></div>
+    <div class="simres big"><span>Anticipo NETO recibido</span><b style="color:var(--green)">${money(Math.round(neto))}</b></div>
+    <div class="simres"><span>Tasa efectiva de la operación</span><b>${ef.toFixed(2)}%</b> <span class="muted" style="font-size:11px">del monto</span></div>`;
+}
+function pickFactor(f){ const rates=window.__SIMR__||[]; const r=rates.find(x=>x.factor===f); SIM.factor=f; if(r)SIM.tasa=+(r.tasaMes*100).toFixed(3); GP.render(); }
+window.SIM=SIM; window.simRecalc=simRecalc; window.pickFactor=pickFactor;
+
+/* ============================================================ FLUJO DE CAJA */
+function vFlujo(R){
   const F=GP.FLUJO; if(!F) return loading('Flujo de Caja');
-  const am=Math.min(12, (new Date()).getMonth()+1);
   const cats=MES.slice(0,12);
-  // real vs proyectado mensual (agregando todo mov)
   const real=Array(12).fill(0), proy=Array(12).fill(0);
   (F.mov||[]).forEach(m=>{ for(let i=0;i<12;i++){ real[i]+=(m.mR&&m.mR[i])||0; proy[i]+=(m.mP&&m.mP[i])||0; } });
   const totLine=(F.movTot||[]).slice();
-  // posición de caja por empresa
   const cajaEmp=(F.caja||[]).slice().map(c=>({label:c.emp,value:c.saldo})).sort((a,b)=>b.value-a.value);
-  // recurrentes LLSS/IVA por mes
   const llss=F.llss||[], iva=F.iva||[];
   const recCats=llss.map(x=>x.lbl?x.lbl.slice(0,3):MES[(x.m||1)-1]);
   const recSeries=[{label:'LLSS',color:AMBER,values:llss.map(x=>x.total)},{label:'IVA',color:BLUE,values:iva.map((x,i)=>x.total)}];
-  // creditos / leasing
   const cred=(F.credito||[]).slice().sort((a,b)=>b.cuotaMes-a.cuotaMes);
   const cT=F.creditoTot||{};
   return `
   <div class="hd"><div><h1>${icon('trend',20)} Flujo de Caja</h1><div class="sub">Movimiento mensual real vs. proyectado · créditos · recurrentes</div></div></div>
   <div class="grid k4">
-    <div class="card kpi glow" style="--accent:var(--green)"><div class="lbl">${icon('bank',13)} Caja consolidada</div><div class="val sm">${mm(F.meta.cajaActual)}</div><div class="note">posición actual del grupo</div></div>
+    <div class="card kpi glow" style="--accent:var(--green)"><div class="lbl">${icon('bank',13)} Caja real consolidada</div><div class="val sm">${mm(F.meta.cajaActual)}</div><div class="note">posición actual del grupo</div></div>
     <div class="card kpi glow" style="--accent:var(--red)"><div class="lbl">${icon('creditCard',13)} Cuota crédito / mes</div><div class="val sm">${mm(cT.cuotaMes||0)}</div><div class="note">${cT.vigentes||0} vigentes · ${cT.pagados||0} pagados</div></div>
     <div class="card kpi glow" style="--accent:var(--amber)"><div class="lbl">${icon('scale',13)} Capital crédito restante</div><div class="val sm">${mm(cT.capital||0)}</div><div class="note">saldo por amortizar</div></div>
     <div class="card kpi glow" style="--accent:var(--purple)"><div class="lbl">${icon('layers',13)} Empresas con caja</div><div class="val">${cajaEmp.length}</div><div class="note">sociedades consolidadas</div></div>
@@ -260,7 +221,7 @@ function vFlujo(R,ctx){
   <div class="panel"><h3>${icon('activity',15)} Movimiento mensual · real vs. proyectado</h3><div class="ph">Ingresos menos egresos por mes (suma de todos los conceptos)</div>
     ${GP.lineChart([{label:'Real',color:GREEN,values:real},{label:'Proyectado',color:AMBER,values:proy}],cats,{h:230,zero:false})}
     <div class="legend"><span><i style="background:${GREEN}"></i>Real</span><span><i style="background:${AMBER}"></i>Proyectado</span></div></div>
-  <div class="panel"><h3>${icon('bars',15)} Flujo neto acumulado del mes</h3><div class="ph">Saldo neto total por mes (movTot)</div>
+  <div class="panel"><h3>${icon('bars',15)} Flujo neto del mes</h3><div class="ph">Saldo neto total por mes (movTot)</div>
     ${GP.lineChart([{label:'Flujo neto',color:BLUE,values:totLine}],cats,{h:210,zero:false,area:true})}</div>
   <div class="split">
     <div class="panel"><h3>${icon('building',15)} Posición de caja por empresa</h3><div class="ph">Saldo disponible por sociedad</div>${GP.hbars(cajaEmp)}</div>
@@ -269,9 +230,9 @@ function vFlujo(R,ctx){
       <div class="legend"><span><i style="background:${AMBER}"></i>LLSS</span><span><i style="background:${BLUE}"></i>IVA</span></div></div>
   </div>
   <div class="panel tight"><h3 style="padding:14px 16px 0">${icon('creditCard',15)} Créditos y leasing</h3><div class="ph" style="padding:0 16px">Cuota mensual, capital restante y avance de cuotas</div>
-    <div class="scroll tall"><table>
+    <div class="scroll tall"><table class="gtab">
       <thead><tr><th>Banco</th><th>Crédito</th><th>Empresa</th><th class="num">Cuota / mes</th><th class="num">Capital rest.</th><th class="num">Cuotas</th><th>Avance</th></tr></thead>
-      <tbody>${cred.map(c=>`<tr><td class="muted">${esc(c.banco)}</td><td>${esc(c.nom)}</td><td class="muted">${empCell(c.emp)}</td>
+      <tbody>${cred.map(c=>`<tr><td class="muted">${esc(c.banco)}</td><td>${esc(c.nom)}</td><td class="muted">${esc(c.emp)}</td>
         <td class="num">${fmt0(c.cuotaMes)}</td><td class="num">${fmt0(c.capital)}</td>
         <td class="num">${c.cuotaActual}/${c.total}</td>
         <td><div style="background:#0b1119;border-radius:5px;height:14px;overflow:hidden;min-width:80px" data-tip="${c.cuotaActual} de ${c.total} cuotas"><div style="height:100%;width:${c.total?100*c.cuotaActual/c.total:0}%;background:${c.rest>0?AMBER:GREEN};border-radius:5px"></div></div></td></tr>`).join('')}
@@ -279,32 +240,32 @@ function vFlujo(R,ctx){
       </tbody></table></div></div>`;
 }
 
-/* ---------- Detalle · CxC candidata ---------- */
-function vDetalle(R,ctx){
+/* ============================================================ DETALLE · CxC candidata (sin logos) */
+function vDetalle(R){
   const cand=candRows(R).slice().sort((a,b)=>b.montoNoOperado-a.montoNoOperado);
   const tot=sum(cand,r=>r.montoNoOperado);
   return `
   <div class="hd"><div><h1>${icon('list',19)} Detalle · CxC candidata a operar</h1><div class="sub">${cand.length.toLocaleString('es-CL')} facturas internas no operadas · ${mm(tot)} · mayores primero</div></div></div>
-  <div class="panel tight"><div class="scroll tall"><table>
+  <div class="panel tight"><div class="scroll tall"><table class="gtab">
     <thead><tr><th>Cliente</th><th>Empresa</th><th>Área</th><th class="num">Monto no operado</th><th class="num">Días mora</th><th>Estado</th><th class="num">Cond. pago</th><th>Vencimiento</th></tr></thead>
-    <tbody>${cand.slice(0,300).map(r=>`<tr><td>${esc(r.cliente)}</td><td class="muted">${empCell(r.empresa)}</td><td class="muted">${esc(r.area)}</td>
+    <tbody>${cand.slice(0,300).map(r=>`<tr><td>${esc(r.cliente)}</td><td class="muted">${esc(r.empresa)}</td><td class="muted">${esc(r.area)}</td>
       <td class="num">${fmt0(r.montoNoOperado)}</td><td class="num">${r.diasMora>0?r.diasMora.toLocaleString('es-CL'):'—'}</td>
       <td>${moraChip(r)}</td><td class="num muted">${r.condicionPago?esc(r.condicionPago)+' d':'—'}</td><td class="muted">${GP.fdate(r.vto)}</td></tr>`).join('')}
     </tbody></table></div>${cand.length>300?`<div class="muted" style="font-size:11px;margin-top:8px">Mostrando 300 de ${cand.length.toLocaleString('es-CL')} facturas · total cartera ${mm(tot)}.</div>`:''}</div>`;
 }
 
 GP.app({
-  key:'factoring', title:'Factoring y Caja', subtitle:'Tesorería · Factoring · Simulación', accent:'--green', icon:'cycle',
+  key:'factoring', title:'Factoring y Caja', subtitle:'Caja · Factoring · Simulador', accent:'--green', icon:'cycle',
   needFlujo:true,
   filters:['empresa'],
   nav:[
-    {v:'resumen',ic:'wallet',label:'Caja & Factoring'},
+    {v:'caja',ic:'bank',label:'Caja'},
+    {v:'factoring',ic:'cycle',label:'Factoring'},
     {v:'simulador',ic:'sliders',label:'Simulador'},
-    {v:'operado',ic:'cycle',label:'Operado'},
     {v:'flujo',ic:'trend',label:'Flujo de caja'},
     {v:'detalle',ic:'list',label:'Detalle CxC'}
   ],
-  views:{resumen:vResumen,simulador:vSimulador,operado:vOperado,flujo:vFlujo,detalle:vDetalle},
+  views:{caja:vCaja,factoring:vFactoring,simulador:vSimulador,flujo:vFlujo,detalle:vDetalle},
   after(V,R){ if(V==='simulador') simRecalc(); }
 });
 </script>
