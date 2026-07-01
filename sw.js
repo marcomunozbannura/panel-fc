@@ -1,7 +1,7 @@
 /* Service Worker · Panel de Gestión · Grupo Progestión
    Cache del "shell" para que la app abra offline. Los datos van cifrados en
    payload.enc.js (tambien cacheado) y se descifran en memoria tras el login. */
-const CACHE = "gp-fc-v1";
+const CACHE = "gp-fc-20260701162256";
 const SHELL = [
   "./",
   "index.html",
