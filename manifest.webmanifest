@@ -1,0 +1,19 @@
+{
+  "name": "Panel de Gestión · Grupo Progestión",
+  "short_name": "Progestión",
+  "description": "Panel gerencial de Facturación, Cobranza y Factoring",
+  "lang": "es-CL",
+  "dir": "ltr",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#070a0f",
+  "theme_color": "#070a0f",
+  "categories": ["business", "finance", "productivity"],
+  "icons": [
+    { "src": "icons/app-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/app-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/app-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

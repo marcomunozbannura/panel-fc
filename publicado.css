@@ -1,0 +1,18 @@
+/* Ajustes del build publicado (celular / snapshot sin motor local) */
+
+/* No hay motor local: se oculta el boton "Actualizar y abrir informe" */
+#btnUpd{display:none!important}
+
+/* Boton flotante "Inicio" (vuelve al portal) */
+#gpHome{
+  position:fixed;z-index:70;
+  right:calc(14px + env(safe-area-inset-right,0px));
+  bottom:calc(var(--bnavH,0px) + env(safe-area-inset-bottom,0px) + 14px);
+  width:46px;height:46px;border-radius:50%;
+  display:flex;align-items:center;justify-content:center;
+  background:linear-gradient(180deg,var(--panel),var(--panel2));
+  border:1px solid var(--line);color:var(--accent);
+  box-shadow:0 10px 30px rgba(0,0,0,.5);cursor:pointer;
+}
+#gpHome:active{transform:translateY(1px)}
+@media(min-width:768px){ #gpHome{ bottom:calc(18px + env(safe-area-inset-bottom,0px)) } }

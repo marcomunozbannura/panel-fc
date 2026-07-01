@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Cobranza · Grupo Progestion</title>
+<link rel="stylesheet" href="_Aplicaciones/_assets/core.css">
+<link rel="stylesheet" href="publicado.css">
+<meta name="theme-color" content="#070a0f">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/apple-touch.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Progestion">
+<meta name="mobile-web-app-capable" content="yes">
+</head>
+<body></body>
+<script src="payload.enc.js"></script>
+<script src="_shared/gpcrypto.js"></script>
+<script src="_shared/store.js"></script>
+<script src="_Aplicaciones/_assets/icons.js"></script>
+<script src="_Aplicaciones/_assets/core.js"></script>
+<script type="text/gp-app">
+const {mm,mAxis,money,fmt0,pct,pctN,sum,uniq,agg,esc,MES,MESF,monthOf,color,icon,parseD,daysB,fdate,yearOf}=GP;
+
+/* ---- base de cobranza: cartera propia = CIERRE cedida='Interna' y tipoCoa!='ANULA' ---- */
+const isInterna = r => GP.isCierre(r) && r.cedida==='Interna' && r.tipoCoa!=='ANULA';
+const mCob   = r => r.montoNoOperado||r.montoNeto||0;   // saldo por cobrar interno
+const mBruto = r => r.montoTotal||0;                    // monto bruto de la factura (c/IVA)
+const carteraRows = R => R.filter(isInterna);
+const TRAMO=[
+  ['1. Mora > 40 días',        'Mora > 40 d',  '#f87171','c-red'],
+  ['2. Mora entre 21-30 días', 'Mora 21-30 d', '#fb923c','c-orange'],
+  ['3. Mora entre 11-20 días', 'Mora 11-20 d', '#fbbf24','c-amber'],
+  ['4. Mora entre 1-10 días',  'Mora 1-10 d',  '#facc15','c-amber'],
+  ['Vigente',                  'Vigente',      '#34d399','c-green']
+];
+const tramoIdx = r => TRAMO.findIndex(t=>t[0]===r.estadoMora);
+const isMora = r => /^\d\.\sMora/.test(r.estadoMora||'');
+const isPend = r => r.estadoMora!=='Pagada';
+const hasDatePago = r => /^\d{4}-\d\d-\d\d/.test(r.fechaPago||'');
+const EMPCOL=['#fbbf24','#22d3ee','#a78bfa','#34d399','#f87171','#60a5fa','#f472b6','#2dd4bf','#fb923c','#a3e635'];
+// nombre de cliente abreviado para ejes de gráficos: conserva el orden natural,
+// recorta sufijos legales/país al final y trunca. (evita reordenar palabras)
+function shortCli(s){ let t=(s||'').toString();
+  t=t.replace(/\s+(S\.?A\.?C?\.?|LTDA\.?|LIMITADA|SPA|EIRL|E\s?HIJOS|Y\s?CIA\.?|INC|CORP|LLC|LTD)\b\.?/gi,'');
+  t=t.replace(/\s+DE\s+CHILE\b/gi,'').replace(/\s+EN\s+CHILE\b/gi,'').replace(/\s+CHILE\b/gi,'');
+  t=t.replace(/[.,]+$/,'').replace(/\s{2,}/g,' ').trim();
+  if(t.length>18) t=t.slice(0,17).trim()+'…';
+  return t||(s||'').toString().slice(0,17); }
+
+/* ============================================================ RESUMEN */
+function vResumen(R){
+  const cie=carteraRows(R);
+  const pend=cie.filter(isPend), mora=cie.filter(isMora);
+  const pendM=sum(pend,mCob), moraM=sum(mora,mCob);
+  const vig=cie.filter(r=>r.estadoMora==='Vigente'); const vigM=sum(vig,mCob);
+  const g40=cie.filter(r=>r.estadoMora===TRAMO[0][0]); const g40M=sum(g40,mCob);
+  // tramos con monto + % (leyenda clara)
+  const tramoSeg=TRAMO.map(t=>({label:t[1],color:t[2],value:sum(cie.filter(r=>r.estadoMora===t[0]),mCob)})).filter(s=>s.value>0);
+  const topDeud=agg(mora,'cliente',mCob).slice(0,10).map(o=>({label:o.k,value:o.v}));
+  return `
+  <div class="hd"><div><h1>${icon('coins',19)} Resumen de cartera</h1><div class="sub">Cartera propia interna (CIERRE no cedido) · saldo por cobrar y estado de mora</div></div></div>
+  <div class="grid k4">
+    <div class="card kpi glow"><div class="lbl">${icon('wallet',13)} Por cobrar (pendiente)</div><div class="val">${mm(pendM)}</div><div class="note"><b>${pend.length.toLocaleString('es-CL')}</b> facturas abiertas</div></div>
+    <div class="card kpi glow" style="--accent:var(--red)"><div class="lbl">${icon('alert',13)} En mora</div><div class="val">${mm(moraM)}</div><div class="note"><b>${mora.length}</b> fac · ${pct(moraM,pendM)} de la cartera</div></div>
+    <div class="card kpi glow" style="--accent:var(--green)"><div class="lbl">${icon('check',13)} Vigente por vencer</div><div class="val">${mm(vigM)}</div><div class="note">${vig.length} fac aún en plazo</div></div>
+    <div class="card kpi glow" style="--accent:var(--orange)"><div class="lbl">${icon('flag',13)} Mora > 40 días</div><div class="val">${mm(g40M)}</div><div class="note">${g40.length} fac · riesgo alto</div></div>
+  </div>
+  <div class="split3">
+    <div class="panel"><h3>${icon('layers',15)} Cartera por tramo de mora</h3><div class="ph">Monto por cobrar según antigüedad</div>
+      <div class="donutwrap">${GP.donut(tramoSeg,{center:pct(moraM,pendM),centerSub:'en mora'})}
+      <div style="flex:1">${tramoSeg.map(s=>`<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:12px;padding:6px 0;border-bottom:1px solid var(--line2)">
+        <span style="display:inline-flex;align-items:center;gap:8px"><i style="width:10px;height:10px;border-radius:3px;background:${s.color};flex:none"></i>${esc(s.label)}</span>
+        <span style="text-align:right"><b>${mm(s.value)}</b> <span class="muted" style="font-size:10.5px">· ${pct(s.value,pendM)}</span></span></div>`).join('')}</div></div></div>
+    <div class="panel"><h3>${icon('users',15)} Top deudores en mora</h3><div class="ph">Clientes con mayor saldo moroso</div>${GP.hbars(topDeud)}</div>
+  </div>
+  <div class="panel"><h3>${icon('list',15)} Facturas en mora por año</h3><div class="ph">Tabla dinámica · clic en el año para desplegar cliente, responsable, factura, mora y monto bruto</div>
+    ${moraTable(mora)}</div>`;
+}
+// tabla dinámica: agrupa la mora por año de emisión, expandible
+function moraTable(mora){
+  const byY={}; mora.forEach(r=>{ const y=(r.emision||r.mesServicio||'').slice(0,4)||'—'; (byY[y]=byY[y]||[]).push(r); });
+  const years=Object.keys(byY).sort((a,b)=>b.localeCompare(a));
+  if(!years.length) return `<div class="empty"><div class="e-ic">${icon('check',30)}</div>Sin facturas en mora para el filtro actual</div>`;
+  return `<div class="scroll tall"><table class="gtab"><thead><tr><th>Año / N° Factura</th><th>Cliente</th><th>Responsable</th><th class="num">Días mora</th><th class="num">Mora (saldo)</th><th class="num">Monto bruto</th></tr></thead><tbody>
+  ${years.map(y=>{ const rs=byY[y].slice().sort((a,b)=>(b.diasMora||0)-(a.diasMora||0)||mCob(b)-mCob(a)); const g='mY'+y;
+    const tM=sum(rs,mCob), tB=sum(rs,mBruto);
+    return `<tr class="exp-h" data-g="${g}"><td><span class="caret">${icon('chevronRight',12)}</span> <b>${esc(y)}</b></td><td class="muted">${rs.length.toLocaleString('es-CL')} facturas en mora</td><td class="muted">—</td><td class="num muted">—</td><td class="num"><b>${fmt0(tM)}</b></td><td class="num muted">${fmt0(tB)}</td></tr>`
+      + rs.slice(0,150).map(r=>`<tr class="exp-c" data-g="${g}"><td class="muted" style="padding-left:28px">${esc(r.nFactura)}</td><td>${esc(r.cliente)}</td><td class="muted">${esc(r.responsable)}</td><td class="num"><b>${fmt0(r.diasMora)}</b></td><td class="num">${fmt0(mCob(r))}</td><td class="num muted">${fmt0(mBruto(r))}</td></tr>`).join('')
+      + (rs.length>150?`<tr class="exp-c" data-g="${g}"><td colspan="6" class="muted" style="padding-left:28px;font-size:11px">Mostrando 150 de ${rs.length.toLocaleString('es-CL')} · afina con los filtros de arriba.</td></tr>`:'');
+  }).join('')}</tbody></table></div>`;
+}
+
+/* ============================================================ AGING (Responsable × Tramo) */
+let AGING={cie:[],resp:[]};
+function vAging(R){
+  const cie=carteraRows(R).filter(isPend);
+  const resp=uniq(cie.map(r=>r.responsable));
+  const cols=TRAMO;
+  const cell=(arr)=>({n:arr.length,m:sum(arr,mCob)});
+  const rows=resp.map(rp=>{ const rr=cie.filter(r=>r.responsable===rp);
+    const cells=cols.map(c=>cell(rr.filter(r=>r.estadoMora===c[0])));
+    return {rp,cells,tot:sum(rr,mCob)};
+  }).sort((a,b)=>b.tot-a.tot);
+  AGING={cie,resp:rows.map(r=>r.rp)};   // responsables en el MISMO orden que las filas (= data-rp de las celdas)
+  const colTot=cols.map((c,ci)=>sum(rows,r=>r.cells[ci].m));
+  const gtot=sum(colTot)||1;
+  const colMax=cols.map((c,ci)=>Math.max(1,...rows.map(r=>r.cells[ci].m)));
+  // heat: la columna > 40 días (ci=0) se pinta MUCHO más roja para los montos grandes
+  const heat=(v,ci)=>{ if(v<=0)return ''; const strong=ci===0, r=Math.min(1,v/colMax[ci]);
+    const a=(strong?0.16:0.09)+(strong?0.78:0.42)*r;
+    return `background:rgba(248,113,113,${a.toFixed(2)})`+(strong&&r>0.45?';color:#fff;font-weight:700':''); };
+  const moraCli=agg(cie.filter(isMora),'cliente',mCob).slice(0,10).map(o=>({label:o.k,value:o.v}));
+  const moraArea=agg(cie.filter(isMora),'area',mCob).slice(0,10).map((o,i)=>({label:o.k,value:o.v,color:EMPCOL[i%EMPCOL.length]}));
+  return `
+  <div class="hd"><div><h1>${icon('layers',19)} Aging de cartera</h1><div class="sub">Matriz Responsable × Tramo de mora · saldo pendiente · clic en una celda para ver el detalle</div></div></div>
+  <div class="panel tight"><div class="scroll tall"><table class="gtab">
+    <thead><tr><th>Responsable</th>${cols.map(c=>`<th class="num"><span class="chip ${c[3]}">${esc(c[1])}</span></th>`).join('')}<th class="num">Total</th></tr></thead>
+    <tbody>${rows.map((r,ri)=>`<tr><td><b>${esc(r.rp)}</b></td>
+      ${r.cells.map((cl,ci)=>`<td class="num agc" data-rp="${ri}" data-tr="${ci}" style="cursor:${cl.n?'pointer':'default'};${cl.m>0?heat(cl.m,ci):''}">${cl.m>0?`${fmt0(cl.m)}<br><span class="muted" style="font-size:10px">${cl.n} fac</span>`:'<span class="muted">—</span>'}</td>`).join('')}
+      <td class="num"><b>${fmt0(r.tot)}</b></td></tr>`).join('')}
+      <tr class="ttl"><td>TOTAL</td>${colTot.map(v=>`<td class="num">${fmt0(v)}</td>`).join('')}<td class="num">${fmt0(gtot)}</td></tr>
+    </tbody></table></div></div>
+  <div class="drill" id="cobDrill"></div>
+  <div class="split">
+    <div class="panel"><h3>${icon('users',15)} Mora por cliente</h3><div class="ph">Mayores saldos morosos (Top 10)</div>${GP.hbars(moraCli)}</div>
+    <div class="panel"><h3>${icon('building',15)} Mora por área</h3><div class="ph">Saldo moroso por unidad de negocio</div>${GP.hbars(moraArea,{labelW:150})}</div>
+  </div>`;
+}
+// drill-down: clic en una celda del aging -> cuadro con área, cliente, días mora y N° factura
+window.cobDrill=function(ri,ci){
+  const rp=AGING.resp[ri]; const tr=TRAMO[ci];
+  const facs=AGING.cie.filter(r=>r.responsable===rp && r.estadoMora===tr[0]).sort((a,b)=>(b.diasMora||0)-(a.diasMora||0));
+  const box=document.getElementById('cobDrill'); if(!box)return;
+  if(!facs.length){ box.className='drill'; box.innerHTML=''; return; }
+  box.className='drill on';
+  box.innerHTML=`<div class="dh"><b>${icon('search',14)} ${esc(rp)} · <span class="chip ${tr[3]}">${esc(tr[1])}</span> · ${facs.length} factura${facs.length>1?'s':''} · ${mm(sum(facs,mCob))}</b><span class="x" onclick="document.getElementById('cobDrill').className='drill'">✕</span></div>
+    <div class="scroll" style="max-height:300px"><table class="gtab"><thead><tr><th>N° Factura</th><th>Cliente</th><th>Área</th><th class="num">Días mora</th><th class="num">Saldo</th></tr></thead>
+    <tbody>${facs.slice(0,120).map(r=>`<tr><td class="muted">${esc(r.nFactura)}</td><td>${esc(r.cliente)}</td><td class="muted">${esc(r.area)}</td><td class="num"><b>${fmt0(r.diasMora)}</b></td><td class="num">${fmt0(mCob(r))}</td></tr>`).join('')}</tbody></table></div>`;
+  box.scrollIntoView({behavior:'smooth',block:'nearest'});
+};
+
+/* ============================================================ COMPORTAMIENTO DE PAGO */
+function vComportamiento(R){
+  const cie=carteraRows(R).filter(hasDatePago);
+  const cli=uniq(cie.map(r=>r.cliente));
+  const rows=cli.map(c=>{ const cr=cie.filter(r=>r.cliente===c);
+    const days=cr.map(r=>daysB(r.emision,r.fechaPago)).filter(d=>d!=null&&d>=0&&d<2000);
+    const prom=days.length?Math.round(sum(days)/days.length):0;
+    const cc={}; cr.forEach(r=>{const k=r.condicionPago||'—';cc[k]=(cc[k]||0)+1;});
+    const cond=Object.entries(cc).sort((a,b)=>b[1]-a[1])[0][0];
+    const fuera=cr.filter(r=>{const d=daysB(r.emision,r.fechaPago); const cp=+r.condicionPago||0; return d!=null&&d>cp;});
+    const monto=sum(cr,mBruto);
+    const montoInc=sum(fuera,mBruto);
+    const ticket=Math.round(monto/(cr.length||1));                 // ticket de facturación promedio
+    return {c,n:cr.length,cond:+cond||0,prom,pFuera:pctN(fuera.length,cr.length),nFuera:fuera.length,montoInc,monto,ticket,pTicketFuera:pctN(montoInc,monto)};
+  }).filter(o=>o.n>=3).sort((a,b)=>b.montoInc-a.montoInc);
+  let totF=0,totN=0,totIncM=0,totM=0;
+  cie.forEach(r=>{const d=daysB(r.emision,r.fechaPago); const cp=+r.condicionPago||0; totN++; totM+=mBruto(r); if(d!=null&&d>cp){totF++;totIncM+=mBruto(r);}});
+  const promGlobal=(()=>{const dd=cie.map(r=>daysB(r.emision,r.fechaPago)).filter(d=>d!=null&&d>=0&&d<2000);return dd.length?Math.round(sum(dd)/dd.length):0;})();
+  // gráfico: los clientes más relevantes por monto incumplido (rows ya viene ordenado por montoInc).
+  // Al FILTRAR por cliente en la barra de arriba, rows queda solo con ese cliente → se grafica ese
+  // (así Marco puede buscar a cualquiera, ej. Nestlé, y ver su condición pactada vs pago real).
+  const top=rows.slice(0,12);
+  const barsCond={label:'Condición pactada (contractual)',color:'#34d399',values:top.map(o=>o.cond)};
+  const barsReal={label:'Días reales de pago',color:'#f87171',values:top.map(o=>o.prom)};
+  const dias=v=>fmt0(v)+' d';
+  return `
+  <div class="hd"><div><h1>${icon('activity',19)} Comportamiento de pago</h1><div class="sub">Días reales de pago vs condición pactada en el contrato · clientes con historial (≥3 facturas pagadas)</div></div></div>
+  <div class="grid k4">
+    <div class="card kpi glow" style="--accent:var(--purple)"><div class="lbl">${icon('hourglass',13)} Pago promedio</div><div class="val">${promGlobal} d</div><div class="note">emisión ${icon('arrowRight',11)} pago (real)</div></div>
+    <div class="card kpi glow" style="--accent:var(--red)"><div class="lbl">${icon('alert',13)} Fuera de condición</div><div class="val">${pct(totF,totN)}</div><div class="note"><b>${totF.toLocaleString('es-CL')}</b> de ${totN.toLocaleString('es-CL')} facturas</div></div>
+    <div class="card kpi glow" style="--accent:var(--amber)"><div class="lbl">${icon('scale',13)} Monto incumplido</div><div class="val sm">${mm(totIncM)}</div><div class="note">${pct(totIncM,totM)} del monto pagado</div></div>
+    <div class="card kpi glow" style="--accent:var(--green)"><div class="lbl">${icon('handshake',13)} Cumplimiento</div><div class="val">${pct(totN-totF,totN)}</div><div class="note">pagó dentro de su condición</div></div>
+  </div>
+  <div class="panel"><h3>${icon('barChart',15)} Días reales de pago vs condición pactada</h3><div class="ph">Top 12 clientes por monto incumplido · <b style="color:#6ee7b7">verde = condición pactada (contrato)</b> · <b style="color:#fca5a5">rojo = días reales que demoró en pagar</b> · <b>filtra un cliente arriba</b> para analizarlo solo · eje en días</div>
+    ${GP.groupedBars(top.map(o=>shortCli(o.c)),[barsCond,barsReal],{h:300,bw:16,rotateX:true,tip:dias,axisFmt:dias,niceAxis:true,ticks:6,barLabel:v=>fmt0(v)+' días',catFull:top.map(o=>o.c)})}
+    <div class="legend"><span><i style="background:#34d399"></i>Condición pactada (contractual)</span><span><i style="background:#f87171"></i>Días reales de pago</span></div></div>
+  <div class="panel tight"><div class="hrow"><div><h3>${icon('list',15)} Detalle de comportamiento por cliente</h3><div class="ph">Ticket promedio, cumplimiento y monto incumplido · usa los filtros de año/mes de arriba</div></div></div>
+    <div class="scroll tall"><table class="gtab">
+    <thead><tr><th>Cliente</th><th class="num">Ticket prom.</th><th class="num">Condición (d)</th><th class="num">Pago prom. (d)</th><th class="num">Desvío</th><th class="num">% fuera cond.</th><th class="num">% ticket tardío</th><th class="num">Facturas</th><th class="num">Monto incumplido</th></tr></thead>
+    <tbody>${rows.slice(0,150).map(o=>{const desv=o.prom-o.cond; return `<tr><td>${esc(o.c)}</td>
+      <td class="num muted">${fmt0(o.ticket)}</td><td class="num muted">${o.cond}</td><td class="num"><b>${o.prom}</b></td>
+      <td class="num"><span class="chip ${desv<=0?'c-green':desv<=15?'c-amber':'c-red'}">${desv>0?'+':''}${desv} d</span></td>
+      <td class="num">${o.pFuera>0?`<span class="chip ${o.pFuera>=50?'c-red':o.pFuera>=25?'c-amber':'c-gray'}">${o.pFuera.toFixed(0)}%</span>`:'<span class="chip c-green">0%</span>'}</td>
+      <td class="num">${o.pTicketFuera>0?`<span class="chip ${o.pTicketFuera>=50?'c-red':o.pTicketFuera>=25?'c-amber':'c-gray'}">${o.pTicketFuera.toFixed(0)}%</span>`:'<span class="chip c-green">0%</span>'}</td>
+      <td class="num muted">${o.nFuera}/${o.n}</td><td class="num">${fmt0(o.montoInc)}</td></tr>`;}).join('')}
+    </tbody></table></div>${rows.length>150?`<div class="muted" style="font-size:11px;margin-top:8px">Mostrando 150 de ${rows.length.toLocaleString('es-CL')} clientes con historial.</div>`:''}</div>`;
+}
+
+/* ============================================================ CICLO DE CAJA (comportamiento financiero) */
+function vCiclo(R){
+  const cie=carteraRows(R);
+  // por cliente: días de emisión (post mes de servicio) y días de cobro, PONDERADOS por monto (bruto)
+  const cli=uniq(cie.map(r=>r.cliente));
+  const rows=cli.map(c=>{ const cr=cie.filter(r=>r.cliente===c);
+    let we=0,wp=0,me=0,mp=0, monto=0, mora=sum(cr.filter(isMora),mCob), n=cr.length;
+    cr.forEach(r=>{ const b=mBruto(r); monto+=b;
+      const de=daysB(r.mesServicio,r.emision);                 // días de emisión respecto al inicio del mes de servicio
+      if(de!=null && de>-400 && de<400){ we+=de*b; me+=b; }
+      if(hasDatePago(r)){ const dp=daysB(r.emision,r.fechaPago); if(dp!=null && dp>=0 && dp<2000){ wp+=dp*b; mp+=b; } }
+    });
+    const emiP=me?Math.round(we/me):0;                          // días emisión ponderado
+    const pagP=mp?Math.round(wp/mp):0;                          // días cobro ponderado
+    const ciclo=emiP+pagP;                                      // mes de servicio -> pago
+    // categoría: crítico si emite tarde (>20d post mes servicio) Y (tiene mora o cobra lento)
+    let cat='sano';
+    if(emiP>20 && (mora>0 || pagP>45)) cat='critico';
+    else if(emiP>12 || pagP>45 || mora>0) cat='atencion';
+    const impacto=monto*Math.max(0,ciclo);                      // capital-días inmovilizado (peso en la caja)
+    return {c,n,monto,emiP,pagP,ciclo,mora,cat,impacto};
+  }).filter(o=>o.n>=3 && o.monto>0).sort((a,b)=>b.impacto-a.impacto);
+  // ponderados globales
+  const totMonto=sum(rows,o=>o.monto)||1;
+  const gEmi=Math.round(sum(rows,o=>o.emiP*o.monto)/totMonto);
+  const gPag=Math.round(sum(rows,o=>o.pagP*o.monto)/totMonto);
+  const gCiclo=gEmi+gPag;
+  const crit=rows.filter(o=>o.cat==='critico');
+  const catChip={critico:['c-red','Crítico'],atencion:['c-amber','Atención'],sano:['c-green','Sano']};
+  const topImp=rows.slice(0,10).map(o=>({label:o.c,value:o.impacto,color:o.cat==='critico'?'#f87171':o.cat==='atencion'?'#fbbf24':'#34d399'}));
+  return `
+  <div class="hd"><div><h1>${icon('cycle',19)} Ciclo de caja por cliente</h1><div class="sub">Comportamiento financiero · demora en EMITIR (vs mes de servicio) + demora en PAGAR · ponderado por monto</div></div></div>
+  <div class="grid k4">
+    <div class="card kpi glow" style="--accent:var(--blue)"><div class="lbl">${icon('calendar',13)} Días de emisión</div><div class="val">${gEmi} d</div><div class="note">tras el inicio del mes de servicio (pond.)</div></div>
+    <div class="card kpi glow" style="--accent:var(--purple)"><div class="lbl">${icon('hourglass',13)} Días de cobro</div><div class="val">${gPag} d</div><div class="note">emisión ${icon('arrowRight',11)} pago (pond.)</div></div>
+    <div class="card kpi glow" style="--accent:var(--amber)"><div class="lbl">${icon('cycle',13)} Ciclo de caja</div><div class="val">${gCiclo} d</div><div class="note">mes de servicio ${icon('arrowRight',11)} pago</div></div>
+    <div class="card kpi glow" style="--accent:var(--red)"><div class="lbl">${icon('alert',13)} Clientes críticos</div><div class="val">${crit.length}</div><div class="note">${mm(sum(crit,o=>o.mora))} en mora · ${mm(sum(crit,o=>o.monto))} facturado</div></div>
+  </div>
+  <div class="split3">
+    <div class="panel"><h3>${icon('flag',15)} Mayor peso en el ciclo de caja</h3><div class="ph">Capital × días inmovilizado (facturación × ciclo)</div>${GP.hbars(topImp,{fmt:v=>mm(v/365)+'·año',labelW:150})}</div>
+    <div class="panel"><h3>${icon('shield',15)} Cómo leerlo</h3><div class="ph">Criterio de categorización</div>
+      <div class="mm-row" style="flex-direction:column">
+        <div class="mmp"><div class="l" style="color:#fca5a5">${icon('alert',12)} Crítico</div><div class="s" style="margin-top:5px">Emite tarde (>20 d tras el mes de servicio) <b>y</b> además genera mora o cobra lento. Alarga el ciclo y traba la caja.</div></div>
+        <div class="mmp"><div class="l" style="color:#fcd34d">${icon('flag',12)} Atención</div><div class="s" style="margin-top:5px">Emite algo tarde, cobra lento o tiene algo de mora. Vigilar.</div></div>
+        <div class="mmp"><div class="l" style="color:#6ee7b7">${icon('check',12)} Sano</div><div class="s" style="margin-top:5px">Emite y paga dentro de un ciclo razonable, sin mora relevante.</div></div>
+      </div></div>
+  </div>
+  <div class="panel tight"><div class="hrow"><div><h3>${icon('list',15)} Ranking de clientes por impacto en el ciclo de caja</h3><div class="ph">Ordenado por capital-días inmovilizado · un cliente grande que emite y paga tarde pesa mucho más</div></div></div>
+    <div class="scroll tall"><table class="gtab">
+    <thead><tr><th>Cliente</th><th class="num">Facturación</th><th class="num">Días emisión</th><th class="num">Días cobro</th><th class="num">Ciclo (d)</th><th class="num">En mora</th><th>Categoría</th></tr></thead>
+    <tbody>${rows.slice(0,150).map(o=>`<tr><td>${esc(o.c)}</td>
+      <td class="num">${fmt0(o.monto)}</td>
+      <td class="num"><span class="chip ${o.emiP>20?'c-red':o.emiP>12?'c-amber':'c-green'}">${o.emiP>0?'+':''}${o.emiP} d</span></td>
+      <td class="num"><span class="chip ${o.pagP>60?'c-red':o.pagP>40?'c-amber':'c-green'}">${o.pagP} d</span></td>
+      <td class="num"><b>${o.ciclo} d</b></td>
+      <td class="num">${o.mora>0?`<span class="chip c-red">${fmt0(o.mora)}</span>`:'<span class="muted">—</span>'}</td>
+      <td><span class="chip ${catChip[o.cat][0]}">${catChip[o.cat][1]}</span></td></tr>`).join('')}
+    </tbody></table></div>${rows.length>150?`<div class="muted" style="font-size:11px;margin-top:8px">Mostrando 150 de ${rows.length.toLocaleString('es-CL')} clientes.</div>`:''}
+    <div class="gloss"><div class="gt">${icon('list',13)} Diccionario · qué significa cada columna</div>
+      <dl>
+        <div class="gi"><dt>Facturación</dt><dd>Monto total facturado al cliente (bruto, con IVA) en el período filtrado.</dd></div>
+        <div class="gi"><dt>Días emisión</dt><dd>Días promedio —ponderados por monto— en <b>emitir</b> la factura desde el inicio del mes de servicio (positivo = emite tarde). <span class="chip c-green">≤ 12 d</span> a tiempo · <span class="chip c-amber">13–20 d</span> algo tarde · <span class="chip c-red">&gt; 20 d</span> emite muy tarde.</dd></div>
+        <div class="gi"><dt>Días cobro</dt><dd>Días promedio —ponderados por monto— entre la <b>emisión</b> y el <b>pago</b> efectivo. <span class="chip c-green">≤ 40 d</span> cobra rápido · <span class="chip c-amber">41–60 d</span> lento · <span class="chip c-red">&gt; 60 d</span> muy lento.</dd></div>
+        <div class="gi"><dt>Ciclo (d)</dt><dd>Ciclo de caja total = <b>días emisión + días cobro</b>. Cuánto tiempo tu dinero queda inmovilizado: del mes de servicio hasta el pago (a más días, peor).</dd></div>
+        <div class="gi"><dt>En mora</dt><dd>Saldo del cliente actualmente <b>vencido e impago</b>. Se muestra en <span class="chip c-red">rojo</span> cuando arrastra mora; <span class="muted">—</span> si está al día.</dd></div>
+        <div class="gi"><dt>Categoría</dt><dd><span class="chip c-red">Crítico</span> emite tarde <i>y</i> además cobra lento o tiene mora · <span class="chip c-amber">Atención</span> a vigilar · <span class="chip c-green">Sano</span> ciclo razonable.</dd></div>
+      </dl></div></div>`;
+}
+
+/* ============================================================ FACTURACIÓN CRÍTICA */
+const CRIT=[['2. CIERRE EN EL MES DE SERVICIO','En el mes','#34d399','c-green'],['3. FUERA DE PLAZO','Fuera de plazo','#f87171','c-red'],['1. ANTICIPO FACTURACION','Anticipo','#60a5fa','c-blue']];
+function vCritica(R){
+  const cie=carteraRows(R);
+  const tot=sum(cie.filter(r=>CRIT.some(c=>c[0]===r.clasifCritica)),r=>r.montoNeto)||1;
+  const enMes=sum(cie.filter(r=>r.clasifCritica===CRIT[0][0]),r=>r.montoNeto);
+  const fuera=sum(cie.filter(r=>r.clasifCritica===CRIT[1][0]),r=>r.montoNeto);
+  const anti =sum(cie.filter(r=>r.clasifCritica===CRIT[2][0]),r=>r.montoNeto);
+  const months=MES.map((mn,i)=>{ const m2=i+1; return {m:mn,parts:CRIT.map(c=>({v:sum(cie.filter(r=>r.clasifCritica===c[0]&&monthOf(r.mesServicio)===m2),r=>r.montoNeto),color:c[2],label:c[1]}))}; });
+  const fueraR=cie.filter(r=>r.clasifCritica===CRIT[1][0]);
+  const byCli=agg(fueraR,'cliente',r=>r.montoNeto).slice(0,10).map(o=>({label:o.k,value:o.v,color:'#f87171'}));
+  const byArea=agg(fueraR,'area',r=>r.montoNeto).slice(0,10).map(o=>({label:o.k,value:o.v,color:'#fb923c'}));
+  const cd=CRIT.map(c=>({label:c[1],color:c[2],value:sum(cie.filter(r=>r.clasifCritica===c[0]),r=>r.montoNeto)}));
+  return `
+  <div class="hd"><div><h1>${icon('alert',19)} Facturación crítica</h1><div class="sub">Relación mes de servicio vs emisión · puntualidad del cierre</div></div></div>
+  <div class="grid k3">
+    <div class="card kpi glow" style="--accent:var(--green)"><div class="lbl">${icon('check',13)} En el mes de servicio</div><div class="val">${pct(enMes,tot)}</div><div class="note">${mm(enMes)} facturado a tiempo</div></div>
+    <div class="card kpi glow" style="--accent:var(--red)"><div class="lbl">${icon('alert',13)} Fuera de plazo</div><div class="val">${pct(fuera,tot)}</div><div class="note">${mm(fuera)} con atraso</div></div>
+    <div class="card kpi glow" style="--accent:var(--blue)"><div class="lbl">${icon('trend',13)} Anticipo</div><div class="val">${pct(anti,tot)}</div><div class="note">${mm(anti)} facturado antes</div></div>
+  </div>
+  <div class="split-2-1">
+    <div class="panel"><h3>${icon('barChart',15)} Puntualidad por mes de servicio</h3><div class="ph">Composición del neto según clasificación crítica</div>
+      ${GP.stackBars(months,{h:210,bw:26})}
+      <div class="legend">${CRIT.map(c=>`<span><i style="background:${c[2]}"></i>${c[1]}</span>`).join('')}</div></div>
+    <div class="panel"><h3>${icon('target',15)} Composición</h3><div class="ph">% del neto por clasificación</div>
+      <div class="donutwrap">${GP.donut(cd,{center:pct(enMes,tot),centerSub:'en el mes'})}${GP.legendList(cd,tot)}</div></div>
+  </div>
+  <div class="split">
+    <div class="panel"><h3>${icon('users',15)} Fuera de plazo por cliente</h3><div class="ph">Clientes con más facturación tardía</div>${GP.hbars(byCli)}</div>
+    <div class="panel"><h3>${icon('building',15)} Fuera de plazo por área</h3><div class="ph">Áreas con más facturación tardía</div>${GP.hbars(byArea,{labelW:150})}</div>
+  </div>`;
+}
+
+/* ============================================================ DETALLE MORA (sin logos) */
+function vDetalle(R){
+  const cie=carteraRows(R).filter(isMora).slice().sort((a,b)=>(b.diasMora||0)-(a.diasMora||0)||mCob(b)-mCob(a));
+  const tramoChip=r=>{ const i=tramoIdx(r); return i>=0?`<span class="chip ${TRAMO[i][3]}">${TRAMO[i][1]}</span>`:'<span class="chip c-gray">—</span>'; };
+  return `
+  <div class="hd"><div><h1>${icon('list',19)} Detalle de facturas en mora</h1><div class="sub">${cie.length.toLocaleString('es-CL')} facturas morosas · mayor antigüedad primero</div></div></div>
+  <div class="panel tight"><div class="scroll tall"><table class="gtab">
+    <thead><tr><th>Cliente</th><th>Empresa</th><th>Área</th><th>Responsable</th><th>Emisión</th><th>Vto.</th><th class="num">Cond.</th><th class="num">Días mora</th><th>Tramo</th><th class="num">Saldo</th><th class="num">Monto bruto</th></tr></thead>
+    <tbody>${cie.slice(0,300).map(r=>`<tr><td>${esc(r.cliente)}</td>
+      <td class="muted">${esc(r.empresa)}</td><td class="muted">${esc(r.area)}</td><td class="muted">${esc(r.responsable)}</td>
+      <td>${fdate(r.emision)}</td><td>${fdate(r.vto)}</td>
+      <td class="num muted">${esc(r.condicionPago||'—')}</td>
+      <td class="num"><b>${fmt0(r.diasMora)}</b></td><td>${tramoChip(r)}</td>
+      <td class="num">${fmt0(mCob(r))}</td><td class="num muted">${fmt0(mBruto(r))}</td></tr>`).join('')}
+    </tbody></table></div>${cie.length>300?`<div class="muted" style="font-size:11px;margin-top:8px">Mostrando 300 de ${cie.length.toLocaleString('es-CL')} facturas en mora.</div>`:''}</div>`;
+}
+
+GP.app({
+  key:'cobranza', title:'Cobranza', subtitle:'Cartera · Mora · Comportamiento', accent:'--amber', icon:'coins',
+  filters:['anio','mes','empresa','area','cliente'], filterDefaults:{anio:'Todos'},
+  nav:[
+    {v:'resumen',ic:'dashboard',label:'Resumen'},
+    {v:'aging',ic:'layers',label:'Aging cartera'},
+    {v:'comportamiento',ic:'activity',label:'Comportamiento pago'},
+    {v:'ciclo',ic:'cycle',label:'Ciclo de caja'},
+    {v:'critica',ic:'alert',label:'Facturación crítica'},
+    {v:'detalle',ic:'list',label:'Detalle mora'}
+  ],
+  views:{resumen:vResumen,aging:vAging,comportamiento:vComportamiento,ciclo:vCiclo,critica:vCritica,detalle:vDetalle}
+});
+// clic en celda del aging -> abre el cuadro de detalle
+document.addEventListener('click',e=>{ const c=e.target.closest('.agc'); if(c&&c.dataset.rp!=null){ window.cobDrill(+c.dataset.rp,+c.dataset.tr); } });
+</script>
+<script src="_shared/boot.js"></script>
+</html>

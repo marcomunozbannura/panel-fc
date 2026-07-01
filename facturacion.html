@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Facturación · Grupo Progestion</title>
+<link rel="stylesheet" href="_Aplicaciones/_assets/core.css">
+<link rel="stylesheet" href="publicado.css">
+<meta name="theme-color" content="#070a0f">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/apple-touch.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Progestion">
+<meta name="mobile-web-app-capable" content="yes">
+</head>
+<body></body>
+<script src="payload.enc.js"></script>
+<script src="_shared/gpcrypto.js"></script>
+<script src="_shared/store.js"></script>
+<script src="_Aplicaciones/_assets/icons.js"></script>
+<script src="_Aplicaciones/_assets/core.js"></script>
+<script type="text/gp-app">
+const {mm,mAxis,money,fmt0,pct,pctN,sum,uniq,agg,esc,MES,isCierre,monthOf,color,icon}=GP;
+const cieRows = R => R.filter(isCierre);
+const mIdx = r => monthOf(r.emision||r.mesServicio);   // por EMISIÓN
+const CRIT=[['2. CIERRE EN EL MES DE SERVICIO','En el mes','#34d399'],['3. FUERA DE PLAZO','Fuera de plazo','#f87171'],['1. ANTICIPO FACTURACION','Anticipo','#60a5fa']];
+const EMPCOL=['#22d3ee','#a78bfa','#34d399','#fbbf24','#f87171','#60a5fa','#f472b6','#2dd4bf','#fb923c','#a3e635'];
+// colores año-contra-año: eléctricos y bien distintos entre sí
+const YRCOL={'2022':'#64748b','2023':'#94a3b8','2024':'#f97316','2025':'#a855f7','2026':'#22d3ee'};
+
+function monthly(cie,val){ const a=Array(12).fill(0); cie.forEach(r=>{const m=mIdx(r); if(m>=1&&m<=12)a[m-1]+=(val(r)||0);}); return a; }
+// último mes CON datos (evita graficar meses futuros vacíos = "precipicio" a $0)
+function activeMonths(cie){ let last=0; (cie||[]).forEach(r=>{const m=mIdx(r); if(m>last)last=m;}); return Math.min(12,Math.max(1,last||1)); }
+// filtra CIERRE por empresa/área/cliente pero IGNORA año/mes (para el análisis año-contra-año)
+function baseRows(){ const F=GP.F; return GP.DB.filter(r=>isCierre(r)&&(F.empresa==='Todas'||r.empresa===F.empresa)&&(!F.area.length||F.area.includes(r.area))&&(F.cliente==='Todas'||r.cliente===F.cliente)); }
+// logo blanco de empresa (+ nombre) para tablas; y solo-logo para rankings. EFICITY = sin logo → nombre.
+function empCellW(name){ const k=GP.LOGOSW[name]; return `<span class="emprow">${k?`<span class="logow"><img src="_Aplicaciones/_assets/logos/${k}.png" alt="${esc(name)}" onerror="this.style.display='none'"></span>`:''}<b>${esc(name)}</b></span>`; }
+function empLogoOnly(name){ const k=GP.LOGOSW[name]; return k?`<span class="logow big"><img src="_Aplicaciones/_assets/logos/${k}.png" alt="${esc(name)}" title="${esc(name)}" onerror="this.style.display='none'"></span>`:`<b style="font-size:11.5px">${esc(name)}</b>`; }
+const yrLabel = ()=> GP.F.anio==='Todos'?'todos los años':'año '+esc(GP.F.anio);
+// --- drill-down: al pinchar un punto del gráfico, ver qué ÁREAS facturaron ese mes ---
+let PT={};
+window.facPt=function(s,i){ const box=document.getElementById('facDrill'); if(!box)return; const month=i+1;
+  let rows,title; const valf=PT.valf||(r=>r.montoNeto), isCount=!!PT.isCount;
+  if(PT.kind==='yoy'){ const yr=PT.years[s]; rows=(PT.rows||[]).filter(r=>GP.yearOf(r)===yr&&mIdx(r)===month); title=(GP.MESF[i]||'')+' '+yr; }
+  else { rows=(PT.rows||[]).filter(r=>mIdx(r)===month); title=(GP.MESF[i]||'')+(PT.year&&PT.year!=='Todos'?' '+PT.year:''); }
+  const areas=agg(rows,'area',isCount?null:valf).filter(o=>o.v>0);
+  if(!areas.length){ box.className='drill'; box.innerHTML=''; return; }
+  const tot=sum(areas,o=>o.v); const fmtv=isCount?(v=>fmt0(v)+' fac.'):(v=>money(v));
+  box.className='drill on';
+  box.innerHTML='<div class="dh"><b>'+icon('layers',14)+' Áreas que facturaron · '+esc(title)+' · '+(isCount?fmt0(tot)+' facturas':mm(tot))+'</b><span class="x" onclick="document.getElementById(\'facDrill\').className=\'drill\'">✕</span></div>'
+    +'<div style="padding:14px 16px">'+GP.hbars(areas.map((o,k)=>({label:o.k,value:o.v,color:EMPCOL[k%EMPCOL.length]})),{fmt:fmtv,labelW:160})+'</div>';
+  box.scrollIntoView({behavior:'smooth',block:'nearest'});
+};
+
+/* ---------- Resumen (foco: año contra año) ---------- */
+function vResumen(R){
+  const cie=cieRows(R);
+  const neta=sum(cie,r=>r.montoNeto), n=cie.length;
+  const enMes=sum(cie.filter(r=>r.clasifCritica===CRIT[0][0]),r=>r.montoNeto);
+  const fuera=sum(cie.filter(r=>r.clasifCritica===CRIT[1][0]),r=>r.montoNeto);
+  const anti =sum(cie.filter(r=>r.clasifCritica===CRIT[2][0]),r=>r.montoNeto);
+  const critTot=enMes+fuera+anti||1;
+  // --- YoY: años presentes (respeta empresa/área/cliente, ignora filtro de año) ---
+  const base=baseRows();
+  const YRS=[...new Set(base.map(GP.yearOf))].filter(Boolean).sort().slice(-3);
+  const curY=YRS[YRS.length-1]||'', prevY=YRS.length>1?YRS[YRS.length-2]:'';
+  const mNeto=yr=>{ const a=Array(12).fill(0); base.filter(r=>GP.yearOf(r)===yr).forEach(r=>{const m=mIdx(r); if(m>=1&&m<=12)a[m-1]+=r.montoNeto;}); return a; };
+  // recorta la cola de meses parciales del año en curso (facturación de un mes se emite hasta el mes sig.):
+  // desde el final, mientras el mes valga < 55% del anterior (incompleto), lo pone en null.
+  function trimTail(vals){ const v=vals.slice(); for(let i=11;i>0;i--){ let p=null; for(let j=i-1;j>=0;j--){ if(v[j]){p=v[j];break;} } if(p&&v[i]<p*0.55){ v[i]=null; } else if(v[i]!=null&&v[i]!==0){ break; } } return v; }
+  const curVals=trimTail(mNeto(curY));
+  let cmpM=0; for(let i=11;i>=0;i--){ if(curVals[i]!=null&&curVals[i]!==0){ cmpM=i+1; break; } }   // último mes completo del año en curso
+  const sumYrM=(yr,upto)=>sum(base.filter(r=>GP.yearOf(r)===yr&&mIdx(r)<=upto),r=>r.montoNeto);
+  const vCur=sumYrM(curY,cmpM), vPrev=prevY?sumYrM(prevY,cmpM):0;
+  const yoy=vPrev?((vCur-vPrev)/vPrev*100):0;
+  const lastM=cmpM;
+  const yoySeries=YRS.map(yr=> yr===curY
+    ? {label:yr,color:YRCOL[yr]||'#5b6776',values:curVals.map(v=>v===0?null:v)}
+    : {label:yr,color:YRCOL[yr]||'#5b6776',values:mNeto(yr)});
+  const cd=CRIT.map(c=>({label:c[1],value:sum(cie.filter(r=>r.clasifCritica===c[0]),r=>r.montoNeto),color:c[2]}));
+  const byEmp=agg(cie,'empresa',r=>r.montoNeto);
+  PT={kind:'yoy',rows:base,years:YRS,isCount:false,valf:r=>r.montoNeto};
+  return `
+  <div class="hd"><div><h1>${icon('dashboard',19)} Resumen</h1><div class="sub">Comparación año contra año · ventas netas (CIERRE)${GP.F.empresa!=='Todas'?' · '+esc(GP.F.empresa):''}</div></div></div>
+  <div class="grid k5">
+    <div class="card kpi glow"><div class="lbl">${icon('coins',13)} Venta neta ${GP.F.anio==='Todos'?'(total)':esc(GP.F.anio)}</div><div class="val">${mm(neta)}</div><div class="note"><b>${n.toLocaleString('es-CL')}</b> facturas</div></div>
+    <div class="card kpi glow" style="--accent:${yoy>=0?'var(--green)':'var(--red)'}"><div class="lbl">${icon('trend',13)} Crecimiento ${esc(curY)} vs ${esc(prevY)}</div><div class="val ${yoy>=0?'up':'down'}" style="display:flex;align-items:center;gap:5px">${icon(yoy>=0?'arrowUp':'arrowDown',18)} ${Math.abs(yoy).toFixed(1)}%</div><div class="note">ene–${MES[Math.max(0,lastM-1)]} · ${mm(vCur)} vs ${mm(vPrev)}</div></div>
+    <div class="card kpi glow" style="--accent:var(--purple)"><div class="lbl">${icon('scale',13)} Ticket promedio</div><div class="val sm">${money(Math.round(neta/(n||1)))}</div><div class="note">neto por factura</div></div>
+    <div class="card kpi glow" style="--accent:var(--green)"><div class="lbl">${icon('check',13)} Cumplimiento en el mes</div><div class="val">${pct(enMes,critTot)}</div><div class="note">facturado en plazo</div></div>
+    <div class="card kpi glow" style="--accent:var(--red)"><div class="lbl">${icon('alert',13)} Fuera de plazo</div><div class="val">${pct(fuera,critTot)}</div><div class="note">${mm(fuera)} tardío</div></div>
+  </div>
+  <div class="panel">
+    <div class="hrow"><div><h3>${icon('trend',15)} Venta neta mensual · año contra año</h3><div class="ph">Trayectoria comparada · ${YRS.map(esc).join(' vs ')} · pasa el mouse para el monto exacto</div></div>
+      <div class="legend" style="margin-top:0">${yoySeries.slice().reverse().map(s=>`<span><i style="background:${s.color}"></i><b style="color:var(--txt)">${esc(s.label)}</b></span>`).join('')}</div></div>
+    ${GP.lineChart(yoySeries,MES,{h:252,tip:v=>money(v),click:true})}
+    <div class="ph" style="margin-top:8px">${icon('search',12)} Pincha un punto para ver qué áreas facturaron ese mes.</div>
+  </div>
+  <div class="drill" id="facDrill"></div>
+  <div class="split3">
+    <div class="panel"><h3>${icon('building',15)} Facturación por empresa</h3><div class="ph">Venta neta por sociedad · ${yrLabel()}</div>${GP.hbars(byEmp.map((o,i)=>({label:o.k,value:o.v,color:EMPCOL[i%EMPCOL.length]})))}</div>
+    <div class="panel"><h3>${icon('target',15)} Calidad de facturación</h3><div class="ph">% del neto por clasificación crítica</div>
+      <div class="donutwrap">${GP.donut(cd,{center:pct(enMes,critTot),centerSub:'en plazo'})}${GP.legendList(cd,critTot)}</div></div>
+  </div>
+  <div class="split">
+    <div class="panel"><h3>${icon('users',15)} Top clientes por facturación</h3><div class="ph">Mayores ventas netas · ${yrLabel()}</div>${GP.hbars(agg(cie,'cliente',r=>r.montoNeto).slice(0,10).map(o=>({label:o.k,value:o.v})))}</div>
+    <div class="panel"><h3>${icon('layers',15)} Facturación por área</h3><div class="ph">Venta neta por unidad de negocio</div>${GP.hbars(agg(cie,'area',r=>r.montoNeto).slice(0,10).map(o=>({label:o.k,value:o.v,color:'linear-gradient(90deg,#a78bfa,#6d28d9)'})))}</div>
+  </div>`;
+}
+
+/* ---------- Tendencia ---------- */
+let TREND_METRIC='neto';
+function vTendencia(R){
+  const cie=cieRows(R); const am=activeMonths(cie);
+  const valf = TREND_METRIC==='bruto'? (r=>r.montoTotal) : TREND_METRIC==='n'? (r=>1) : (r=>r.montoNeto);
+  const isCount = TREND_METRIC==='n';
+  const tip = isCount? (v=>fmt0(v)+' facturas') : (v=>money(v));
+  const axisFmt = isCount? (v=>fmt0(v)) : mAxis;                 // eje numérico cuando es conteo (arregla "N° facturas")
+  const serie=monthly(cie,valf).slice(0,am);
+  const topEmp=agg(cie,'empresa',r=>r.montoNeto).slice(0,5).map(o=>o.k);
+  const empSeries=topEmp.map((e,i)=>({label:e,color:EMPCOL[i%EMPCOL.length],values:monthly(cie.filter(r=>r.empresa===e),valf).slice(0,am)}));
+  const cats=MES.slice(0,am);
+  const clasSeries=CRIT.map(c=>({label:c[1],color:c[2],values:monthly(cie.filter(r=>r.clasifCritica===c[0]),r=>r.montoNeto).slice(0,am)}));
+  PT={kind:'trend',rows:cie,valf,isCount,year:GP.F.anio};
+  return `
+  <div class="hd"><div><h1>${icon('trend',19)} Tendencia de ventas</h1><div class="sub">Evolución mensual · ${yrLabel()}${GP.F.mes.length?' · '+GP.F.mes.slice().sort((a,b)=>a-b).map(m=>GP.MESF[m-1]).join(', '):''}</div></div>
+    <div class="seg">
+      <button class="${TREND_METRIC==='neto'?'on':''}" onclick="TREND_METRIC='neto';GP.render()">Venta neta</button>
+      <button class="${TREND_METRIC==='bruto'?'on':''}" onclick="TREND_METRIC='bruto';GP.render()">Venta bruta</button>
+      <button class="${TREND_METRIC==='n'?'on':''}" onclick="TREND_METRIC='n';GP.render()">N° facturas</button>
+    </div></div>
+  <div class="panel"><h3>${icon('activity',15)} Facturación mensual total</h3><div class="ph">${isCount?'Cantidad de facturas emitidas':'Monto '+(TREND_METRIC==='bruto'?'bruto':'neto')} por mes de emisión · ${icon('search',11)} pincha un punto para ver las áreas · detalle exacto al pasar el mouse</div>
+    ${GP.lineChart([{label:isCount?'N° facturas':'Total',color:color('--cyan'),values:serie}],cats,{area:true,h:220,tip,axisFmt,click:true})}
+    <div class="drill" id="facDrill"></div></div>
+  <div class="panel"><h3>${icon('building',15)} Tendencia por empresa (Top 5)</h3><div class="ph">Trayectoria de las principales sociedades</div>
+    ${GP.lineChart(empSeries,cats,{h:230,tip,axisFmt})}
+    <div class="legend">${empSeries.map(s=>`<span><i style="background:${s.color}"></i>${esc(s.label)}</span>`).join('')}</div></div>
+  <div class="panel"><h3>${icon('barChart',15)} Puntualidad por mes</h3><div class="ph">Composición del neto facturado por clasificación crítica</div>
+    ${GP.groupedBars(cats,clasSeries,{h:220,tip:v=>money(v)})}
+    <div class="legend">${clasSeries.map(s=>`<span><i style="background:${s.color}"></i>${esc(s.label)}</span>`).join('')}</div></div>`;
+}
+
+/* ---------- Por empresa ---------- */
+function vEmpresa(R){
+  const cie=cieRows(R); const am=activeMonths(cie);
+  const emp=uniq(cie.map(r=>r.empresa));
+  const rows=emp.map(e=>{ const er=cie.filter(r=>r.empresa===e);
+    const neta=sum(er,r=>r.montoNeto), n=er.length;
+    const enMes=sum(er.filter(r=>r.clasifCritica===CRIT[0][0]),r=>r.montoNeto);
+    const fuera=sum(er.filter(r=>r.clasifCritica===CRIT[1][0]),r=>r.montoNeto);
+    return {e,neta,n,enMes,fuera,serie:monthly(er,r=>r.montoNeto).slice(0,am)};
+  }).sort((a,b)=>b.neta-a.neta);
+  const tot=sum(rows,r=>r.neta)||1;
+  return `
+  <div class="hd"><div><h1>${icon('building',19)} Por empresa</h1><div class="sub">Ranking de ventas netas por sociedad · ${yrLabel()}</div></div></div>
+  <div class="panel tight"><div class="scroll tall"><table class="wide">
+    <thead><tr><th>Empresa</th><th class="num">Venta neta</th><th class="num">% del total</th><th class="num">N° fac.</th><th class="num">Ticket</th><th class="num">% en el mes</th><th class="num">% fuera plazo</th><th>Tendencia</th></tr></thead>
+    <tbody>${rows.map(o=>`<tr><td>${empCellW(o.e)}</td><td class="num">${fmt0(o.neta)}</td><td class="num muted">${pct(o.neta,tot)}</td>
+      <td class="num">${o.n.toLocaleString('es-CL')}</td><td class="num">${fmt0(o.neta/(o.n||1))}</td>
+      <td class="num"><span class="chip ${pctN(o.enMes,o.neta)>=80?'c-green':'c-amber'}">${pct(o.enMes,o.neta)}</span></td>
+      <td class="num">${o.fuera>0?`<span class="chip c-red">${pct(o.fuera,o.neta)}</span>`:'<span class="muted">—</span>'}</td>
+      <td>${GP.spark(o.serie,color('--cyan'))}</td></tr>`).join('')}
+      <tr class="ttl"><td><b style="padding-left:2px">TOTAL</b></td><td class="num">${fmt0(tot)}</td><td class="num">100%</td><td class="num">${sum(rows,r=>r.n).toLocaleString('es-CL')}</td><td colspan="4"></td></tr>
+    </tbody></table></div></div>
+  <div class="split">
+    <div class="panel"><h3>${icon('pie',15)} Participación por empresa</h3><div class="ph">Peso de cada sociedad en la venta</div>
+      <div class="donutwrap">${GP.donut(rows.slice(0,8).map((o,i)=>({label:o.e,value:o.neta,color:EMPCOL[i%EMPCOL.length]})),{center:pct(rows[0]?rows[0].neta:0,tot),centerSub:rows[0]?rows[0].e:''})}
+      <div style="flex:1">${rows.slice(0,7).map((o,i)=>`<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:12px;padding:5px 0;border-bottom:1px solid var(--line2)"><span style="display:inline-flex;align-items:center;gap:8px;min-width:0"><i style="width:9px;height:9px;border-radius:2px;background:${EMPCOL[i%EMPCOL.length]};flex:none"></i>${empLogoOnly(o.e)}</span><b>${pct(o.neta,tot)}</b></div>`).join('')}</div></div></div>
+    <div class="panel"><h3>${icon('list',15)} Ranking de venta neta</h3><div class="ph">Logo por sociedad · monto al pasar el mouse</div>
+      <div style="display:flex;flex-direction:column;gap:10px">${rows.map((o,i)=>`
+        <div style="display:grid;grid-template-columns:150px minmax(0,1fr) 92px;align-items:center;gap:12px">
+          <div style="min-width:0">${empLogoOnly(o.e)}</div>
+          <div style="background:#0b1119;border-radius:5px;height:18px;overflow:hidden" data-tip="<b>${esc(o.e)}</b><br>${money(o.neta)}">
+            <div style="height:100%;width:${100*o.neta/(rows[0]?rows[0].neta:1)}%;background:${EMPCOL[i%EMPCOL.length]};border-radius:5px;transition:width .5s"></div></div>
+          <div class="num muted" style="font-size:11.5px">${mm(o.neta)}</div>
+        </div>`).join('')}</div></div>
+  </div>`;
+}
+
+/* ---------- Por área ---------- */
+function vArea(R){
+  const cie=cieRows(R);
+  const ar=uniq(cie.map(r=>r.area));
+  const rows=ar.map(a=>{ const arr=cie.filter(r=>r.area===a);
+    const neta=sum(arr,r=>r.montoNeto), n=arr.length;
+    const fuera=sum(arr.filter(r=>r.clasifCritica===CRIT[1][0]),r=>r.montoNeto);
+    const enMes=sum(arr.filter(r=>r.clasifCritica===CRIT[0][0]),r=>r.montoNeto);
+    return {a,neta,n,fuera,enMes};
+  }).sort((x,y)=>y.neta-x.neta);
+  const tot=sum(rows,r=>r.neta)||1;
+  return `
+  <div class="hd"><div><h1>${icon('layers',19)} Por área</h1><div class="sub">Venta neta por unidad de negocio · ${yrLabel()}</div></div></div>
+  <div class="split-2-1">
+    <div class="panel tight"><div class="scroll tall"><table>
+      <thead><tr><th>Área</th><th class="num">Venta neta</th><th class="num">%</th><th class="num">N°</th><th class="num">Ticket</th><th class="num">% fuera plazo</th></tr></thead>
+      <tbody>${rows.map(o=>`<tr><td><b>${esc(o.a)}</b></td><td class="num">${fmt0(o.neta)}</td><td class="num muted">${pct(o.neta,tot)}</td>
+        <td class="num">${o.n.toLocaleString('es-CL')}</td><td class="num">${fmt0(o.neta/(o.n||1))}</td>
+        <td class="num">${o.fuera>0?`<span class="chip c-red">${pct(o.fuera,o.neta)}</span>`:'<span class="chip c-green">0%</span>'}</td></tr>`).join('')}
+        <tr class="ttl"><td>TOTAL</td><td class="num">${fmt0(tot)}</td><td class="num">100%</td><td class="num">${sum(rows,r=>r.n).toLocaleString('es-CL')}</td><td colspan="2"></td></tr>
+      </tbody></table></div></div>
+    <div class="panel"><h3>${icon('pie',15)} Distribución</h3><div class="ph">Venta por área</div>${GP.hbars(rows.map((o,i)=>({label:o.a,value:o.neta,color:EMPCOL[i%EMPCOL.length]})),{labelW:130})}</div>
+  </div>`;
+}
+
+GP.app({
+  key:'facturacion', title:'Facturación', subtitle:'Ventas · Tendencia · Cierre', accent:'--cyan', icon:'receipt',
+  filters:['anio','mes','empresa','area','cliente'],
+  nav:[
+    {v:'resumen',ic:'dashboard',label:'Resumen'},
+    {v:'tendencia',ic:'trend',label:'Tendencia de ventas'},
+    {v:'empresa',ic:'building',label:'Por empresa'},
+    {v:'area',ic:'layers',label:'Por área'}
+  ],
+  views:{resumen:vResumen,tendencia:vTendencia,empresa:vEmpresa,area:vArea}
+});
+// clic en un punto del gráfico -> desglose de áreas
+document.addEventListener('click',e=>{ const p=e.target.closest('.lcpt'); if(p){ window.facPt(+p.getAttribute('data-s'),+p.getAttribute('data-i')); } });
+</script>
+<script src="_shared/boot.js"></script>
+</html>
